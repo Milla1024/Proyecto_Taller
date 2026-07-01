@@ -1,79 +1,102 @@
-DROP TABLE IF EXISTS Trabaja;
-DROP TABLE IF EXISTS Servicio;
-DROP TABLE IF EXISTS Orden_Accesorios;
-DROP TABLE IF EXISTS Cliente_Telefono;
-DROP TABLE IF EXISTS Cliente_Correo;
-DROP TABLE IF EXISTS Orden;
-DROP TABLE IF EXISTS Vehiculo;
-DROP TABLE IF EXISTS Empleado;
-DROP TABLE IF EXISTS Cliente;
+PRAGMA foreign_keys = ON;
 
-create table Cliente(
-	id INT primary key,
-    nombre varchar(100),
-    direccion varchar(100)
+DROP TABLE IF EXISTS trabaja;
+DROP TABLE IF EXISTS servicio;
+DROP TABLE IF EXISTS orden_accesorios;
+DROP TABLE IF EXISTS cliente_telefono;
+DROP TABLE IF EXISTS cliente_correo;
+DROP TABLE IF EXISTS orden_servicio;
+DROP TABLE IF EXISTS vehiculo;
+DROP TABLE IF EXISTS empleado;
+DROP TABLE IF EXISTS cliente;
+
+CREATE TABLE cliente (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    direccion TEXT
 );
 
-CREATE TABLE Cliente_Telefono (
-    id_cliente INT,
-    telefono VARCHAR(20),
+CREATE TABLE cliente_telefono (
+    id_cliente INTEGER NOT NULL,
+    telefono TEXT NOT NULL,
     PRIMARY KEY (id_cliente, telefono),
-    FOREIGN KEY (id_cliente) REFERENCES Cliente(id)
+    FOREIGN KEY (id_cliente) REFERENCES cliente(id)
+        ON DELETE CASCADE
 );
 
-CREATE TABLE Cliente_Correo (
-    id_cliente INT,
-    correo VARCHAR(100),
+CREATE TABLE cliente_correo (
+    id_cliente INTEGER NOT NULL,
+    correo TEXT NOT NULL,
     PRIMARY KEY (id_cliente, correo),
-    FOREIGN KEY (id_cliente) REFERENCES Cliente(id)
+    FOREIGN KEY (id_cliente) REFERENCES cliente(id)
+        ON DELETE CASCADE
 );
 
-CREATE TABLE Vehiculo (
-    vin VARCHAR(50) PRIMARY KEY,
-    marca VARCHAR(50),
-    modelo VARCHAR(50),
-    color VARCHAR(30),
-    kilometraje INT,
-    anio INT,
-    placas VARCHAR(20),
-    id_cliente INT,
-    FOREIGN KEY (id_cliente) REFERENCES Cliente(id)
+CREATE TABLE vehiculo (
+    vin TEXT PRIMARY KEY,
+    marca TEXT NOT NULL,
+    modelo TEXT NOT NULL,
+    color TEXT,
+    kilometraje INTEGER DEFAULT 0,
+    anio INTEGER,
+    placas TEXT,
+    id_cliente INTEGER NOT NULL,
+    FOREIGN KEY (id_cliente) REFERENCES cliente(id)
+        ON DELETE CASCADE
 );
 
-CREATE TABLE Orden (
-    no_orden INT PRIMARY KEY,
-    descripcion TEXT,
-    fecha_ingreso DATE,
-    fecha_salida DATE,
-    vin VARCHAR(50),
-    FOREIGN KEY (vin) REFERENCES Vehiculo(vin)
+CREATE TABLE empleado (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    puesto TEXT,
+    telefono TEXT
 );
 
-CREATE TABLE Orden_Accesorios (
-    no_orden INT,
-    accesorio VARCHAR(100),
+CREATE TABLE orden_servicio (
+    no_orden INTEGER PRIMARY KEY AUTOINCREMENT,
+    descripcion_falla TEXT NOT NULL,
+    fecha_ingreso TEXT NOT NULL,
+    fecha_salida TEXT,
+    estado TEXT DEFAULT 'Pendiente',
+    kilometraje_ingreso INTEGER,
+    gasolina TEXT,
+    observaciones TEXT,
+    subtotal REAL DEFAULT 0,
+    impuesto REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    vin TEXT NOT NULL,
+    FOREIGN KEY (vin) REFERENCES vehiculo(vin)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE orden_accesorios (
+    no_orden INTEGER NOT NULL,
+    accesorio TEXT NOT NULL,
+    presente INTEGER DEFAULT 1,
     PRIMARY KEY (no_orden, accesorio),
-    FOREIGN KEY (no_orden) REFERENCES Orden(no_orden)
+    FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+        ON DELETE CASCADE
 );
 
-CREATE TABLE Empleado (
-    id INT PRIMARY KEY,
-    nombre VARCHAR(100)
-);
-
-CREATE TABLE Trabaja (
-    id_empleado INT,
-    no_orden INT,
+CREATE TABLE trabaja (
+    id_empleado INTEGER NOT NULL,
+    no_orden INTEGER NOT NULL,
+    rol TEXT,
     PRIMARY KEY (id_empleado, no_orden),
-    FOREIGN KEY (id_empleado) REFERENCES Empleado(id),
-    FOREIGN KEY (no_orden) REFERENCES Orden(no_orden)
+    FOREIGN KEY (id_empleado) REFERENCES empleado(id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+        ON DELETE CASCADE
 );
 
-CREATE TABLE Servicio (
-    vin VARCHAR(50),
-    no_orden INT,
-    tipo VARCHAR(50),
-    PRIMARY KEY (vin, no_orden),
-    FOREIGN KEY (vin) REFERENCES Vehiculo(vin),
-    FOREIGN KEY (no_orden) REFERENCES Orden(no_orden)
+CREATE TABLE servicio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    no_orden INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    descripcion TEXT,
+    costo_mano_obra REAL DEFAULT 0,
+    costo_repuestos REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+        ON DELETE CASCADE
 );
