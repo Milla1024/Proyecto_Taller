@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../widgets/custom_button.dart';
+import 'service_order_screen.dart';
 
 class AppColors {
   static const ink = Color(0xFF202A33);
@@ -31,7 +32,7 @@ class _MainShellState extends State<MainShell> {
   static const destinations = [
     _Destination('Inicio', Icons.dashboard_outlined),
     _Destination('Ordenes', Icons.assignment_outlined),
-    _Destination('Servicios', Icons.fact_check_outlined),
+    _Destination('Orden servicio', Icons.fact_check_outlined),
     _Destination('Clientes', Icons.qr_code_2_outlined),
     _Destination('Facturas', Icons.receipt_long_outlined),
   ];
@@ -92,27 +93,24 @@ class _MainShellState extends State<MainShell> {
           Expanded(
             child: IndexedStack(
               index: selectedIndex,
-              children: const [
-                DashboardView(),
-                ModulePlaceholder(
+              children: [
+                DashboardView(
+                  onCreateOrder: () => setState(() => selectedIndex = 2),
+                ),
+                const ModulePlaceholder(
                   icon: Icons.assignment_outlined,
                   title: 'Ordenes activas',
                   description:
                       'Listado con prioridades, estado del vehiculo y filtros por fecha, cliente o urgencia.',
                 ),
-                ModulePlaceholder(
-                  icon: Icons.fact_check_outlined,
-                  title: 'Hoja de servicios',
-                  description:
-                      'Plantilla personalizable para servicios realizados y datos de la orden del cliente.',
-                ),
-                ModulePlaceholder(
+                const ServiceOrderScreen(),
+                const ModulePlaceholder(
                   icon: Icons.qr_code_2_outlined,
                   title: 'Vista del cliente',
                   description:
                       'Seguimiento publico con codigo QR o link para consultar el estado del vehiculo.',
                 ),
-                ModulePlaceholder(
+                const ModulePlaceholder(
                   icon: Icons.receipt_long_outlined,
                   title: 'Facturacion',
                   description:
@@ -143,7 +141,9 @@ class _MainShellState extends State<MainShell> {
 }
 
 class DashboardView extends StatelessWidget {
-  const DashboardView({super.key});
+  const DashboardView({super.key, required this.onCreateOrder});
+
+  final VoidCallback onCreateOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -152,7 +152,7 @@ class DashboardView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const HeaderSection(),
+          HeaderSection(onCreateOrder: onCreateOrder),
           const SizedBox(height: 20),
           const SummaryGrid(),
           const SizedBox(height: 20),
@@ -191,7 +191,7 @@ class DashboardView extends StatelessWidget {
             },
           ),
           const SizedBox(height: 20),
-          const ModuleGrid(),
+          ModuleGrid(onOpenServiceOrder: onCreateOrder),
         ],
       ),
     );
@@ -199,7 +199,9 @@ class DashboardView extends StatelessWidget {
 }
 
 class HeaderSection extends StatelessWidget {
-  const HeaderSection({super.key});
+  const HeaderSection({super.key, required this.onCreateOrder});
+
+  final VoidCallback onCreateOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -228,7 +230,7 @@ class HeaderSection extends StatelessWidget {
         CustomButton(
           label: 'Nueva orden',
           icon: Icons.add_circle_outline,
-          onPressed: () {},
+          onPressed: onCreateOrder,
         ),
       ],
     );
@@ -593,7 +595,9 @@ class ReminderTile extends StatelessWidget {
 }
 
 class ModuleGrid extends StatelessWidget {
-  const ModuleGrid({super.key});
+  const ModuleGrid({super.key, required this.onOpenServiceOrder});
+
+  final VoidCallback onOpenServiceOrder;
 
   static const modules = [
     ModuleItem(
@@ -645,7 +649,12 @@ class ModuleGrid extends StatelessWidget {
               mainAxisSpacing: 12,
               mainAxisExtent: 176,
             ),
-            itemBuilder: (context, index) => ModuleCard(module: modules[index]),
+            itemBuilder: (context, index) => ModuleCard(
+              module: modules[index],
+              onTap: modules[index].title == 'Estado inicial'
+                  ? onOpenServiceOrder
+                  : () {},
+            ),
           );
         },
       ),
@@ -654,28 +663,36 @@ class ModuleGrid extends StatelessWidget {
 }
 
 class ModuleCard extends StatelessWidget {
-  const ModuleCard({super.key, required this.module});
+  const ModuleCard({super.key, required this.module, required this.onTap});
 
   final ModuleItem module;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(module.icon, color: module.color, size: 30),
-            const Spacer(),
-            Text(module.title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(module.description),
-          ],
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(module.icon, color: module.color, size: 30),
+              const Spacer(),
+              Text(
+                module.title,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 6),
+              Text(module.description),
+            ],
+          ),
         ),
       ),
     );
