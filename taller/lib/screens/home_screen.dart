@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../widgets/custom_button.dart';
 import 'service_order_screen.dart';
+import 'user_management_screen.dart';
 
 class AppColors {
   static const ink = Color(0xFF202A33);
@@ -35,6 +36,7 @@ class _MainShellState extends State<MainShell> {
     _Destination('Orden servicio', Icons.fact_check_outlined),
     _Destination('Clientes', Icons.qr_code_2_outlined),
     _Destination('Facturas', Icons.receipt_long_outlined),
+    _Destination('Usuarios', Icons.manage_accounts_outlined),
   ];
 
   @override
@@ -96,6 +98,7 @@ class _MainShellState extends State<MainShell> {
               children: [
                 DashboardView(
                   onCreateOrder: () => setState(() => selectedIndex = 2),
+                  onOpenUsuarios: () => setState(() => selectedIndex = 5),
                 ),
                 const ModulePlaceholder(
                   icon: Icons.assignment_outlined,
@@ -116,6 +119,7 @@ class _MainShellState extends State<MainShell> {
                   description:
                       'Historial de facturas, filtros, impresion y exportacion a Excel.',
                 ),
+                const UserManagementScreen(),
               ],
             ),
           ),
@@ -141,9 +145,14 @@ class _MainShellState extends State<MainShell> {
 }
 
 class DashboardView extends StatelessWidget {
-  const DashboardView({super.key, required this.onCreateOrder});
+  const DashboardView({
+    super.key,
+    required this.onCreateOrder,
+    required this.onOpenUsuarios,
+  });
 
   final VoidCallback onCreateOrder;
+  final VoidCallback onOpenUsuarios;
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +200,10 @@ class DashboardView extends StatelessWidget {
             },
           ),
           const SizedBox(height: 20),
-          ModuleGrid(onOpenServiceOrder: onCreateOrder),
+          ModuleGrid(
+            onOpenServiceOrder: onCreateOrder,
+            onOpenUsuarios: onOpenUsuarios,
+          ),
         ],
       ),
     );
@@ -595,9 +607,14 @@ class ReminderTile extends StatelessWidget {
 }
 
 class ModuleGrid extends StatelessWidget {
-  const ModuleGrid({super.key, required this.onOpenServiceOrder});
+  const ModuleGrid({
+    super.key,
+    required this.onOpenServiceOrder,
+    required this.onOpenUsuarios,
+  });
 
   final VoidCallback onOpenServiceOrder;
+  final VoidCallback onOpenUsuarios;
 
   static const modules = [
     ModuleItem(
@@ -651,9 +668,16 @@ class ModuleGrid extends StatelessWidget {
             ),
             itemBuilder: (context, index) => ModuleCard(
               module: modules[index],
-              onTap: modules[index].title == 'Estado inicial'
-                  ? onOpenServiceOrder
-                  : () {},
+              onTap: () {
+                switch (modules[index].title) {
+                  case 'Estado inicial':
+                    onOpenServiceOrder();
+                    break;
+                  case 'Usuarios':
+                    onOpenUsuarios();
+                    break;
+                }
+              },
             ),
           );
         },

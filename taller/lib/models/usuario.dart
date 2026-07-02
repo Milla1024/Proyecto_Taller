@@ -5,6 +5,7 @@ class Usuario {
     required this.correo,
     required this.rol,
     required this.activo,
+    required this.numeroEmpleado,
   });
 
   final int id;
@@ -12,6 +13,7 @@ class Usuario {
   final String correo;
   final String rol;
   final bool activo;
+  final String numeroEmpleado;
 
   Usuario copyWith({
     int? id,
@@ -19,6 +21,7 @@ class Usuario {
     String? correo,
     String? rol,
     bool? activo,
+    String? numeroEmpleado,
   }) {
     return Usuario(
       id: id ?? this.id,
@@ -26,6 +29,7 @@ class Usuario {
       correo: correo ?? this.correo,
       rol: rol ?? this.rol,
       activo: activo ?? this.activo,
+      numeroEmpleado: numeroEmpleado ?? this.numeroEmpleado,
     );
   }
 
@@ -36,6 +40,7 @@ class Usuario {
       correo: map['correo'] as String,
       rol: map['rol'] as String,
       activo: (map['activo'] as int) == 1,
+      numeroEmpleado: map['numero_empleado'] as String,
     );
   }
 
@@ -46,6 +51,7 @@ class Usuario {
       'correo': correo,
       'rol': rol,
       'activo': activo ? 1 : 0,
+      'numero_empleado': numeroEmpleado,
     };
   }
 }
