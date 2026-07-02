@@ -1,46 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/usuario.dart';
+import '../services/api_service.dart';
 import '../widgets/custom_button.dart';
 import 'home_screen.dart';
 import 'service_order_screen.dart';
 
-const _roles = ['Administrador', 'Mecanico', 'Recepcion', 'Supervisor'];
-
-const _initialUsuarios = [
-  Usuario(
-    id: 1,
-    nombre: 'Carlos Martinez',
-    correo: 'carlos.martinez@tallerpitstop.com',
-    rol: 'Administrador',
-    activo: true,
-    numeroEmpleado: 'EMP-001',
-  ),
-  Usuario(
-    id: 2,
-    nombre: 'Ana Lopez',
-    correo: 'ana.lopez@tallerpitstop.com',
-    rol: 'Recepcion',
-    activo: true,
-    numeroEmpleado: 'EMP-002',
-  ),
-  Usuario(
-    id: 3,
-    nombre: 'Jose Ramirez',
-    correo: 'jose.ramirez@tallerpitstop.com',
-    rol: 'Mecanico',
-    activo: true,
-    numeroEmpleado: 'EMP-003',
-  ),
-  Usuario(
-    id: 4,
-    nombre: 'Miriam Cruz',
-    correo: 'miriam.cruz@tallerpitstop.com',
-    rol: 'Supervisor',
-    activo: false,
-    numeroEmpleado: 'EMP-004',
-  ),
-];
+const _roles = ['Administrador', 'Mecánico', 'Ayudante'];
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -51,9 +17,16 @@ class UserManagementScreen extends StatefulWidget {
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
   final searchController = TextEditingController();
-  final List<Usuario> usuarios = List.of(_initialUsuarios);
-  int nextId = _initialUsuarios.length + 1;
+  final List<Usuario> usuarios = [];
   String query = '';
+  bool isLoading = true;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarUsuarios();
+  }
 
   @override
   void dispose() {
@@ -81,15 +54,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     if (created == null) {
       return;
     }
-    setState(() {
-      usuarios.add(created.copyWith(id: nextId));
-      nextId += 1;
-    });
+    final saved = await ApiService.instance.crearUsuario(created);
+    await _cargarUsuarios();
     if (!mounted) {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${created.nombre} fue agregado correctamente.')),
+      SnackBar(content: Text('${saved.nombre} fue agregado correctamente.')),
     );
   }
 
@@ -101,12 +72,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     if (updated == null) {
       return;
     }
-    setState(() {
-      final index = usuarios.indexWhere((item) => item.id == usuario.id);
-      if (index != -1) {
-        usuarios[index] = updated;
-      }
-    });
+    await ApiService.instance.actualizarUsuario(updated);
+    await _cargarUsuarios();
     if (!mounted) {
       return;
     }
@@ -140,9 +107,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     if (confirmed != true) {
       return;
     }
-    setState(() {
-      usuarios.removeWhere((item) => item.id == usuario.id);
-    });
+    await ApiService.instance.eliminarUsuario(usuario.id);
+    await _cargarUsuarios();
     if (!mounted) {
       return;
     }
@@ -159,6 +125,30 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
+  Future<void> _cargarUsuarios() async {
+    try {
+      final loaded = await ApiService.instance.listarUsuarios();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        usuarios
+          ..clear()
+          ..addAll(loaded);
+        isLoading = false;
+        errorMessage = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        isLoading = false;
+        errorMessage = 'No se pudo cargar la base local: $error';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -172,12 +162,22 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             onCreate: openCreateDialog,
           ),
           const SizedBox(height: 20),
-          UserTable(
-            usuarios: filteredUsuarios,
-            onViewProfile: viewProfile,
-            onEdit: openEditDialog,
-            onDelete: confirmDelete,
-          ),
+          if (isLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (errorMessage != null)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(errorMessage!),
+              ),
+            )
+          else
+            UserTable(
+              usuarios: filteredUsuarios,
+              onViewProfile: viewProfile,
+              onEdit: openEditDialog,
+              onDelete: confirmDelete,
+            ),
         ],
       ),
     );
@@ -550,7 +550,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
   final formKey = GlobalKey<FormState>();
   late final TextEditingController nombreController;
   late final TextEditingController numeroController;
-  late final TextEditingController correoController;
+  late final TextEditingController contrasenaController;
   late String rol;
   late bool activo;
 
@@ -560,7 +560,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     final usuario = widget.usuario;
     nombreController = TextEditingController(text: usuario?.nombre ?? '');
     numeroController = TextEditingController(text: usuario?.numeroEmpleado ?? '');
-    correoController = TextEditingController(text: usuario?.correo ?? '');
+    contrasenaController = TextEditingController();
     rol = usuario?.rol ?? _roles.first;
     activo = usuario?.activo ?? true;
   }
@@ -569,7 +569,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
   void dispose() {
     nombreController.dispose();
     numeroController.dispose();
-    correoController.dispose();
+    contrasenaController.dispose();
     super.dispose();
   }
 
@@ -581,10 +581,12 @@ class _UserFormDialogState extends State<_UserFormDialog> {
       Usuario(
         id: widget.usuario?.id ?? 0,
         nombre: nombreController.text.trim(),
-        correo: correoController.text.trim(),
         rol: rol,
         activo: activo,
         numeroEmpleado: numeroController.text.trim(),
+        contrasena: contrasenaController.text.trim().isEmpty
+            ? null
+            : contrasenaController.text.trim(),
       ),
     );
   }
@@ -612,10 +614,12 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                 validator: requiredField,
               ),
               AppTextField(
-                label: 'Correo',
-                controller: correoController,
-                keyboardType: TextInputType.emailAddress,
-                validator: requiredField,
+                label: isEditing
+                    ? 'Nueva contrasena (opcional)'
+                    : 'Contrasena',
+                controller: contrasenaController,
+                obscureText: true,
+                validator: isEditing ? null : requiredField,
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -700,7 +704,6 @@ class UserProfileScreen extends StatelessWidget {
                     Center(child: RoleChip(label: usuario.rol, active: usuario.activo)),
                     const SizedBox(height: 24),
                     ProfileField(label: 'Numero de empleado', value: usuario.numeroEmpleado),
-                    ProfileField(label: 'Correo', value: usuario.correo),
                     ProfileField(
                       label: 'Estado',
                       value: usuario.activo ? 'Activo' : 'Inactivo',

@@ -1107,6 +1107,7 @@ class AppTextField extends StatelessWidget {
     this.hintText,
     this.keyboardType,
     this.validator,
+    this.obscureText = false,
   });
 
   final String label;
@@ -1114,6 +1115,7 @@ class AppTextField extends StatelessWidget {
   final String? hintText;
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
+  final bool obscureText;
 
   @override
   Widget build(BuildContext context) {
@@ -1123,6 +1125,7 @@ class AppTextField extends StatelessWidget {
         controller: controller,
         keyboardType: keyboardType,
         validator: validator,
+        obscureText: obscureText,
         decoration: InputDecoration(
           labelText: label,
           hintText: hintText,

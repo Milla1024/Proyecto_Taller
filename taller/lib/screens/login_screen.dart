@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/api_service.dart';
 import '../widgets/custom_button.dart';
 import 'home_screen.dart';
 
@@ -15,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final nombreController = TextEditingController();
   final contrasenaController = TextEditingController();
   bool obscurePassword = true;
+  bool isLoading = false;
 
   @override
   void dispose() {
@@ -93,9 +95,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 24),
                         CustomButton(
-                          label: 'Ingresar',
+                          label: isLoading ? 'Ingresando...' : 'Ingresar',
                           icon: Icons.login_outlined,
-                          onPressed: _realizarLogin,
+                          onPressed: isLoading ? null : _realizarLogin,
                         ),
                         const SizedBox(height: 18),
                         const _AccessNote(),
@@ -111,8 +113,27 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _realizarLogin() {
+  Future<void> _realizarLogin() async {
     if (!formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() => isLoading = true);
+    final usuario = await ApiService.instance.iniciarSesion(
+      nombreController.text,
+      contrasenaController.text,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() => isLoading = false);
+
+    if (usuario == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nombre, contrasena o estado de empleado invalido.'),
+        ),
+      );
       return;
     }
 
