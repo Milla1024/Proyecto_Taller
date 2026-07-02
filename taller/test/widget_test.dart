@@ -12,6 +12,7 @@ void main() {
     expect(find.text('Ordenes activas'), findsWidgets);
     expect(find.text('Trabajos realizados'), findsOneWidget);
     expect(find.text('Entregas y avisos'), findsOneWidget);
+
     expect(find.text('Modulos del sistema'), findsOneWidget);
   });
 }
