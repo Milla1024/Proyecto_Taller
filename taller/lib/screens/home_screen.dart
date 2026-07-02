@@ -53,6 +53,16 @@ class _MainShellState extends State<MainShell> {
               child: Icon(Icons.notifications_none_outlined),
             ),
           ),
+          IconButton(
+            tooltip: 'Cerrar sesion',
+            onPressed: () {
+              Navigator.of(context).pushNamedAndRemoveUntil(
+                '/',
+                (route) => false,
+              );
+            },
+            icon: const Icon(Icons.logout_outlined),
+          ),
           const SizedBox(width: 8),
         ],
       ),
