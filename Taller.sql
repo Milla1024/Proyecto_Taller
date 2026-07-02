@@ -48,8 +48,9 @@ CREATE TABLE vehiculo (
 CREATE TABLE empleado (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
-    puesto TEXT,
+    puesto ENUM('Mecánico', 'Ayudante', 'Administrador') NOT NULL,
     telefono TEXT
+    contraseña TEXT NOT NULL
 );
 
 CREATE TABLE orden_servicio (
@@ -57,7 +58,7 @@ CREATE TABLE orden_servicio (
     descripcion_falla TEXT NOT NULL,
     fecha_ingreso TEXT NOT NULL,
     fecha_salida TEXT,
-    estado TEXT DEFAULT 'Pendiente',
+    estado ENUM('En Proceso', 'Finalizado', 'Cancelado') NOT NULL DEFAULT 'En Proceso',
     kilometraje_ingreso INTEGER,
     gasolina TEXT,
     observaciones TEXT,
