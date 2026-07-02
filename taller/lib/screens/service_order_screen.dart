@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../models/usuario.dart';
+import '../services/api_service.dart';
+import '../services/print_service.dart';
 import '../widgets/custom_button.dart';
 import 'home_screen.dart';
 
 class ServiceOrderScreen extends StatefulWidget {
-  const ServiceOrderScreen({super.key});
+  const ServiceOrderScreen({super.key, this.currentUser});
+
+  final Usuario? currentUser;
 
   @override
   State<ServiceOrderScreen> createState() => _ServiceOrderScreenState();
@@ -17,7 +22,7 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   final addressController = TextEditingController();
   final phoneController = TextEditingController();
   final emailController = TextEditingController();
-  final orderController = TextEditingController(text: 'OT-1043');
+  final orderController = TextEditingController();
   final entryDateController = TextEditingController();
   final deliveryDateController = TextEditingController();
   final brandController = TextEditingController();
@@ -57,7 +62,21 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   bool authorizeRepair = false;
   bool authorizeTestDrive = false;
   bool acceptsTerms = false;
-  final List<Offset?> signaturePoints = [];
+  int? selectedEmployeeId;
+  String selectedEmployeeRole = 'Mecanico';
+  final Map<int, String> assignedEmployees = {};
+  List<Usuario> employees = [];
+  int? currentEmployeeId;
+  int? previewOrderId;
+  bool employeesLoading = true;
+  bool orderSaved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    loadEmployees();
+    loadNextOrderNumber();
+  }
 
   @override
   void dispose() {
@@ -79,7 +98,28 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
     super.dispose();
   }
 
-  void saveOrder() {
+  Future<void> saveOrder() async {
+    final orderId = previewOrderId;
+    if (orderId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Generando numero de orden, intenta de nuevo.'),
+        ),
+      );
+      return;
+    }
+
+    if (orderSaved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'La orden ${formatOrderNumber(orderId)} ya fue guardada.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final valid = formKey.currentState?.validate() ?? false;
     if (!valid) {
       return;
@@ -94,20 +134,61 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
       return;
     }
 
-    if (signaturePoints.whereType<Offset>().length < 2) {
+    if (assignedEmployees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('El cliente debe firmar la orden.')),
+        const SnackBar(content: Text('Asigna al menos un empleado.')),
       );
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Orden ${orderController.text.trim()} guardada correctamente.',
+    try {
+      await ApiService.instance.guardarOrdenServicio(
+        noOrden: orderId,
+        clienteNombre: nameController.text,
+        clienteDireccion: addressController.text,
+        clienteTelefono: phoneController.text,
+        clienteCorreo: emailController.text,
+        vehiculoVin: vinController.text,
+        vehiculoMarca: brandController.text,
+        vehiculoModelo: modelController.text,
+        vehiculoColor: colorController.text,
+        vehiculoAnio: int.tryParse(yearController.text.trim()),
+        vehiculoPlacas: plateController.text,
+        descripcionFalla: faultController.text,
+        fechaIngreso: entryDateController.text,
+        fechaSalida: deliveryDateController.text,
+        kilometrajeIngreso: int.tryParse(mileageController.text.trim()),
+        gasolina: '${(fuelLevel * 100).round()}%',
+        accesorios: inventory,
+        empleadosAsignados: assignedEmployees,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        orderSaved = true;
+        orderController.text = formatOrderNumber(orderId);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Orden ${formatOrderNumber(orderId)} guardada con '
+            '${assignedEmployees.length} empleado(s) asignado(s).',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar la orden: $error')),
+      );
+      await loadNextOrderNumber();
+    }
   }
 
   void clearForm() {
@@ -121,20 +202,138 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
       authorizeRepair = false;
       authorizeTestDrive = false;
       acceptsTerms = false;
-      signaturePoints.clear();
+      orderSaved = false;
+      assignedEmployees.clear();
+      final currentId = currentEmployeeId;
+      if (currentId != null) {
+        assignedEmployees[currentId] = 'Responsable';
+      }
+      selectedEmployeeId = firstAvailableEmployeeId();
+      selectedEmployeeRole = 'Mecanico';
+    });
+    loadNextOrderNumber();
+  }
+
+  Future<void> loadNextOrderNumber() async {
+    final orderId = await ApiService.instance.obtenerSiguienteNoOrden();
+    if (!mounted || orderSaved) {
+      return;
+    }
+
+    setState(() {
+      previewOrderId = orderId;
+      orderController.text = formatOrderNumber(orderId);
     });
   }
 
-  void addSignaturePoint(Offset point) {
-    setState(() => signaturePoints.add(point));
+  String formatOrderNumber(int id) => 'OT-$id';
+
+  Future<void> loadEmployees() async {
+    final loaded = await ApiService.instance.listarUsuarios();
+    if (!mounted) {
+      return;
+    }
+
+    final activeEmployees = loaded
+        .where((employee) => employee.activo)
+        .toList();
+    setState(() {
+      employees = activeEmployees;
+      currentEmployeeId =
+          widget.currentUser?.id ??
+          (activeEmployees.isEmpty ? null : activeEmployees.first.id);
+      assignedEmployees.clear();
+      final currentId = currentEmployeeId;
+      if (currentId != null) {
+        assignedEmployees[currentId] = 'Responsable';
+      }
+      selectedEmployeeId = firstAvailableEmployeeId();
+      employeesLoading = false;
+    });
   }
 
-  void finishSignatureStroke() {
-    setState(() => signaturePoints.add(null));
+  int? firstAvailableEmployeeId() {
+    for (final employee in employees) {
+      if (!assignedEmployees.containsKey(employee.id)) {
+        return employee.id;
+      }
+    }
+    return null;
   }
 
-  void clearSignature() {
-    setState(signaturePoints.clear);
+  void addEmployeeToOrder() {
+    final employeeId = selectedEmployeeId;
+    if (employeeId == null) {
+      return;
+    }
+
+    setState(() {
+      assignedEmployees[employeeId] = selectedEmployeeRole;
+      selectedEmployeeId = firstAvailableEmployeeId();
+    });
+  }
+
+  void removeEmployeeFromOrder(int employeeId) {
+    if (employeeId == currentEmployeeId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El empleado actual debe permanecer en la orden.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      assignedEmployees.remove(employeeId);
+      selectedEmployeeId = employeeId;
+    });
+  }
+
+  void updateEmployeeRole(int employeeId, String role) {
+    setState(() => assignedEmployees[employeeId] = role);
+  }
+
+  Future<void> printOrder() async {
+    if (previewOrderId == null || orderController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Generando numero de orden, intenta de nuevo.'),
+        ),
+      );
+      return;
+    }
+
+    final employeeLabels = assignedEmployees.entries.map((entry) {
+      final employee = employees.firstWhere((item) => item.id == entry.key);
+      return '${employee.nombre} - ${entry.value}';
+    }).toList();
+
+    await printServiceOrder(
+      ServiceOrderPrintData(
+        orderNumber: orderController.text.trim(),
+        customerName: nameController.text,
+        customerAddress: addressController.text,
+        customerPhone: phoneController.text,
+        customerEmail: emailController.text,
+        entryDate: entryDateController.text,
+        deliveryDate: deliveryDateController.text,
+        vehicleBrand: brandController.text,
+        vehicleModel: modelController.text,
+        vehicleYear: yearController.text,
+        vehicleColor: colorController.text,
+        vehiclePlate: plateController.text,
+        vehicleVin: vinController.text,
+        mileage: mileageController.text,
+        fuelLevel: '${(fuelLevel * 100).round()}%',
+        failureDescription: faultController.text,
+        accessories: inventory,
+        assignedEmployees: employeeLabels,
+        requiresQuote: requiresQuote,
+        authorizeRepair: authorizeRepair,
+        authorizeTestDrive: authorizeTestDrive,
+        acceptsTerms: acceptsTerms,
+      ),
+    );
   }
 
   @override
@@ -196,6 +395,28 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
               },
             ),
             const SizedBox(height: 16),
+            EmployeeAssignmentSection(
+              employees: employees,
+              assignedEmployees: assignedEmployees,
+              currentEmployeeId: currentEmployeeId,
+              isLoading: employeesLoading,
+              selectedEmployeeId: selectedEmployeeId,
+              selectedEmployeeRole: selectedEmployeeRole,
+              onEmployeeSelected: (value) {
+                if (value != null) {
+                  setState(() => selectedEmployeeId = value);
+                }
+              },
+              onRoleSelected: (value) {
+                if (value != null) {
+                  setState(() => selectedEmployeeRole = value);
+                }
+              },
+              onAddEmployee: addEmployeeToOrder,
+              onRemoveEmployee: removeEmployeeFromOrder,
+              onAssignedRoleChanged: updateEmployeeRole,
+            ),
+            const SizedBox(height: 16),
             VehicleSection(
               brandController: brandController,
               modelController: modelController,
@@ -250,10 +471,6 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
               onAcceptsTermsChanged: (value) {
                 setState(() => acceptsTerms = value ?? false);
               },
-              signaturePoints: signaturePoints,
-              onSignaturePointAdded: addSignaturePoint,
-              onSignatureStrokeFinished: finishSignatureStroke,
-              onSignatureCleared: clearSignature,
             ),
             const SizedBox(height: 18),
             Wrap(
@@ -271,15 +488,7 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
                   label: const Text('Limpiar'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'La impresion se conectara al modulo de facturacion.',
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: printOrder,
                   icon: const Icon(Icons.print_outlined),
                   label: const Text('Imprimir'),
                 ),
@@ -345,7 +554,9 @@ class ServiceOrderHeader extends StatelessWidget {
                   ),
                 ),
                 SizedBox(height: 4),
-                Text('Dirección: Gracias Lempira, Frente a Puma Circunvalación'),
+                Text(
+                  'Dirección: Gracias Lempira, Frente a Puma Circunvalación',
+                ),
                 Text('Telefono: 9622-9701 '),
               ],
             );
@@ -445,7 +656,8 @@ class OrderMetaSection extends StatelessWidget {
           AppTextField(
             label: 'No. orden',
             controller: orderController,
-            validator: requiredField,
+            hintText: 'OT-id',
+            readOnly: true,
           ),
           AppTextField(
             label: 'Fecha de ingreso',
@@ -459,6 +671,296 @@ class OrderMetaSection extends StatelessWidget {
             hintText: 'DD/MM/AAAA',
           ),
         ],
+      ),
+    );
+  }
+}
+
+class EmployeeAssignmentSection extends StatelessWidget {
+  const EmployeeAssignmentSection({
+    super.key,
+    required this.employees,
+    required this.assignedEmployees,
+    required this.currentEmployeeId,
+    required this.isLoading,
+    required this.selectedEmployeeId,
+    required this.selectedEmployeeRole,
+    required this.onEmployeeSelected,
+    required this.onRoleSelected,
+    required this.onAddEmployee,
+    required this.onRemoveEmployee,
+    required this.onAssignedRoleChanged,
+  });
+
+  static const roles = ['Responsable', 'Mecanico', 'Ayudante', 'Supervisor'];
+
+  final List<Usuario> employees;
+  final Map<int, String> assignedEmployees;
+  final int? currentEmployeeId;
+  final bool isLoading;
+  final int? selectedEmployeeId;
+  final String selectedEmployeeRole;
+  final ValueChanged<int?> onEmployeeSelected;
+  final ValueChanged<String?> onRoleSelected;
+  final VoidCallback onAddEmployee;
+  final ValueChanged<int> onRemoveEmployee;
+  final void Function(int employeeId, String role) onAssignedRoleChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final availableEmployees = employees
+        .where((employee) => !assignedEmployees.containsKey(employee.id))
+        .toList();
+    final selectedAvailable = availableEmployees.any(
+      (employee) => employee.id == selectedEmployeeId,
+    );
+
+    return FormSection(
+      title: 'Empleados asignados',
+      icon: Icons.engineering_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'El empleado actual se agrega automaticamente a la orden. '
+            'Estos datos corresponden a la relacion trabaja(id_empleado, no_orden, rol).',
+          ),
+          const SizedBox(height: 14),
+          if (isLoading)
+            const LinearProgressIndicator(
+              minHeight: 4,
+              color: AppColors.teal,
+              backgroundColor: AppColors.softGray,
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 760;
+                final selector = DropdownButtonFormField<int>(
+                  initialValue: selectedAvailable ? selectedEmployeeId : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Empleado',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: [
+                    for (final employee in availableEmployees)
+                      DropdownMenuItem<int>(
+                        value: employee.id,
+                        child: Text('${employee.nombre} - ${employee.rol}'),
+                      ),
+                  ],
+                  onChanged: availableEmployees.isEmpty
+                      ? null
+                      : onEmployeeSelected,
+                );
+
+                final roleSelector = DropdownButtonFormField<String>(
+                  initialValue: selectedEmployeeRole,
+                  decoration: const InputDecoration(
+                    labelText: 'Rol en la orden',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: [
+                    for (final role in roles)
+                      DropdownMenuItem<String>(value: role, child: Text(role)),
+                  ],
+                  onChanged: availableEmployees.isEmpty ? null : onRoleSelected,
+                );
+
+                final addButton = SizedBox(
+                  height: 48,
+                  child: FilledButton.icon(
+                    onPressed: availableEmployees.isEmpty
+                        ? null
+                        : onAddEmployee,
+                    icon: const Icon(Icons.person_add_alt_outlined),
+                    label: const Text('Agregar'),
+                  ),
+                );
+
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      selector,
+                      const SizedBox(height: 10),
+                      roleSelector,
+                      const SizedBox(height: 10),
+                      addButton,
+                    ],
+                  );
+                }
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: selector),
+                    const SizedBox(width: 12),
+                    Expanded(flex: 2, child: roleSelector),
+                    const SizedBox(width: 12),
+                    addButton,
+                  ],
+                );
+              },
+            ),
+          const SizedBox(height: 14),
+          for (final entry in assignedEmployees.entries) ...[
+            AssignedEmployeeTile(
+              employee: employees.firstWhere(
+                (employee) => employee.id == entry.key,
+              ),
+              role: entry.value,
+              isCurrentEmployee: entry.key == currentEmployeeId,
+              roles: roles,
+              onRoleChanged: (role) {
+                if (role != null) {
+                  onAssignedRoleChanged(entry.key, role);
+                }
+              },
+              onRemove: () => onRemoveEmployee(entry.key),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class AssignedEmployeeTile extends StatelessWidget {
+  const AssignedEmployeeTile({
+    super.key,
+    required this.employee,
+    required this.role,
+    required this.isCurrentEmployee,
+    required this.roles,
+    required this.onRoleChanged,
+    required this.onRemove,
+  });
+
+  final Usuario employee;
+  final String role;
+  final bool isCurrentEmployee;
+  final List<String> roles;
+  final ValueChanged<String?> onRoleChanged;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCurrentEmployee ? AppColors.tealSoft : AppColors.mist,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isCurrentEmployee ? AppColors.teal : AppColors.border,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 620;
+          final employeeInfo = Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: AppColors.panel,
+                foregroundColor: AppColors.steel,
+                child: Text(employee.nombre.substring(0, 1)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      employee.nombre,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(employee.rol),
+                  ],
+                ),
+              ),
+              if (isCurrentEmployee)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: StatusLabel(text: 'Actual'),
+                ),
+            ],
+          );
+
+          final roleDropdown = DropdownButtonFormField<String>(
+            initialValue: role,
+            decoration: const InputDecoration(
+              labelText: 'Rol',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: [
+              for (final option in roles)
+                DropdownMenuItem<String>(value: option, child: Text(option)),
+            ],
+            onChanged: onRoleChanged,
+          );
+
+          final removeButton = IconButton(
+            tooltip: isCurrentEmployee
+                ? 'El empleado actual no se puede quitar'
+                : 'Quitar empleado',
+            onPressed: onRemove,
+            icon: const Icon(Icons.close_outlined),
+          );
+
+          if (compact) {
+            return Column(
+              children: [
+                employeeInfo,
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: roleDropdown),
+                    const SizedBox(width: 8),
+                    removeButton,
+                  ],
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(flex: 3, child: employeeInfo),
+              const SizedBox(width: 12),
+              Expanded(flex: 2, child: roleDropdown),
+              const SizedBox(width: 8),
+              removeButton,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class StatusLabel extends StatelessWidget {
+  const StatusLabel({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: AppColors.teal,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }
@@ -516,7 +1018,11 @@ class VehicleSection extends StatelessWidget {
               controller: plateController,
               validator: requiredField,
             ),
-            AppTextField(label: 'VIN', controller: vinController),
+            AppTextField(
+              label: 'VIN',
+              controller: vinController,
+              validator: requiredField,
+            ),
           ];
 
           return GridView.builder(
@@ -805,28 +1311,20 @@ class AuthorizationSection extends StatelessWidget {
     required this.authorizeRepair,
     required this.authorizeTestDrive,
     required this.acceptsTerms,
-    required this.signaturePoints,
     required this.onRequiresQuoteChanged,
     required this.onAuthorizeRepairChanged,
     required this.onAuthorizeTestDriveChanged,
     required this.onAcceptsTermsChanged,
-    required this.onSignaturePointAdded,
-    required this.onSignatureStrokeFinished,
-    required this.onSignatureCleared,
   });
 
   final bool requiresQuote;
   final bool authorizeRepair;
   final bool authorizeTestDrive;
   final bool acceptsTerms;
-  final List<Offset?> signaturePoints;
   final ValueChanged<bool?> onRequiresQuoteChanged;
   final ValueChanged<bool?> onAuthorizeRepairChanged;
   final ValueChanged<bool?> onAuthorizeTestDriveChanged;
   final ValueChanged<bool?> onAcceptsTermsChanged;
-  final ValueChanged<Offset> onSignaturePointAdded;
-  final VoidCallback onSignatureStrokeFinished;
-  final VoidCallback onSignatureCleared;
 
   @override
   Widget build(BuildContext context) {
@@ -877,22 +1375,7 @@ class AuthorizationSection extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                SignaturePad(
-                  points: signaturePoints,
-                  onPointAdded: onSignaturePointAdded,
-                  onStrokeFinished: onSignatureStrokeFinished,
-                  onCleared: onSignatureCleared,
-                ),
-                const SizedBox(height: 10),
-                const Center(
-                  child: Text(
-                    'FIRMA DEL CLIENTE',
-                    style: TextStyle(
-                      color: AppColors.ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+                const SignatureLine(),
               ],
             ),
           );
@@ -917,149 +1400,29 @@ class AuthorizationSection extends StatelessWidget {
   }
 }
 
-class SignaturePad extends StatelessWidget {
-  const SignaturePad({
-    super.key,
-    required this.points,
-    required this.onPointAdded,
-    required this.onStrokeFinished,
-    required this.onCleared,
-  });
-
-  final List<Offset?> points;
-  final ValueChanged<Offset> onPointAdded;
-  final VoidCallback onStrokeFinished;
-  final VoidCallback onCleared;
+class SignatureLine extends StatelessWidget {
+  const SignatureLine({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Acepto:',
-          style: TextStyle(color: AppColors.slate, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          height: 140,
-          decoration: BoxDecoration(
-            color: AppColors.mist,
-            border: Border.all(color: AppColors.slate),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onPanStart: (details) {
-                  onPointAdded(details.localPosition);
-                },
-                onPanUpdate: (details) {
-                  final point = details.localPosition;
-                  final inside =
-                      point.dx >= 0 &&
-                      point.dy >= 0 &&
-                      point.dx <= constraints.maxWidth &&
-                      point.dy <= constraints.maxHeight;
-                  if (inside) {
-                    onPointAdded(point);
-                  }
-                },
-                onPanEnd: (_) => onStrokeFinished(),
-                child: CustomPaint(
-                  painter: SignaturePainter(points),
-                  child: points.whereType<Offset>().isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Firma aqui',
-                            style: TextStyle(color: AppColors.slate),
-                          ),
-                        )
-                      : const SizedBox.expand(),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed: onCleared,
-              icon: const Icon(Icons.backspace_outlined),
-              label: const Text('Limpiar firma'),
-            ),
-            StatusChip(signed: points.whereType<Offset>().length >= 2),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class StatusChip extends StatelessWidget {
-  const StatusChip({super.key, required this.signed});
-
-  final bool signed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: signed ? AppColors.tealSoft : AppColors.softGray,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return const Padding(
+      padding: EdgeInsets.only(top: 28),
+      child: Column(
         children: [
-          Icon(
-            signed ? Icons.check_circle_outline : Icons.edit_outlined,
-            color: signed ? AppColors.teal : AppColors.slate,
-            size: 18,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            signed ? 'Firmado' : 'Pendiente',
-            style: TextStyle(
-              color: signed ? AppColors.teal : AppColors.slate,
-              fontWeight: FontWeight.w800,
+          Divider(color: AppColors.ink, thickness: 1),
+          SizedBox(height: 8),
+          Center(
+            child: Text(
+              'FIRMA DEL CLIENTE',
+              style: TextStyle(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
       ),
     );
-  }
-}
-
-class SignaturePainter extends CustomPainter {
-  const SignaturePainter(this.points);
-
-  final List<Offset?> points;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.ink
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    for (var i = 0; i < points.length - 1; i++) {
-      final current = points[i];
-      final next = points[i + 1];
-      if (current != null && next != null) {
-        canvas.drawLine(current, next, paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant SignaturePainter oldDelegate) {
-    return oldDelegate.points != points;
   }
 }
 
@@ -1108,6 +1471,7 @@ class AppTextField extends StatelessWidget {
     this.keyboardType,
     this.validator,
     this.obscureText = false,
+    this.readOnly = false,
   });
 
   final String label;
@@ -1116,6 +1480,7 @@ class AppTextField extends StatelessWidget {
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
   final bool obscureText;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -1126,6 +1491,7 @@ class AppTextField extends StatelessWidget {
         keyboardType: keyboardType,
         validator: validator,
         obscureText: obscureText,
+        readOnly: readOnly,
         decoration: InputDecoration(
           labelText: label,
           hintText: hintText,

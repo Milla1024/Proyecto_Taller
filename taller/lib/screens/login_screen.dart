@@ -138,9 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => const MainShell(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => MainShell(currentUser: usuario)),
     );
   }
 
@@ -201,10 +199,7 @@ class _LoginHeader extends StatelessWidget {
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const SizedBox(height: 8),
-        const Text(
-          'Acceso de empleados',
-          textAlign: TextAlign.center,
-        ),
+        const Text('Acceso de empleados', textAlign: TextAlign.center),
       ],
     );
   }
