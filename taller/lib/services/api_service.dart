@@ -62,7 +62,9 @@ class ApiService {
     ''');
 
     final columns = await db.rawQuery('PRAGMA table_info(empleado)');
-    final columnNames = columns.map((column) => column['name'] as String).toSet();
+    final columnNames = columns
+        .map((column) => column['name'] as String)
+        .toSet();
     Future<void> addColumn(String name, String definition) async {
       if (!columnNames.contains(name)) {
         await db.execute('ALTER TABLE empleado ADD COLUMN $definition');
@@ -78,7 +80,9 @@ class ApiService {
       WHERE numero_empleado IS NULL OR numero_empleado = ''
     ''');
 
-    final countRows = await db.rawQuery('SELECT COUNT(*) AS total FROM empleado');
+    final countRows = await db.rawQuery(
+      'SELECT COUNT(*) AS total FROM empleado',
+    );
     final count = countRows.first['total'] as int;
     if (count == 0) {
       await db.insert('empleado', {
@@ -90,6 +94,96 @@ class ApiService {
         'numero_empleado': 'EMP-001',
       });
     }
+
+    await _prepareServiceOrderTables(db);
+  }
+
+  Future<void> _prepareServiceOrderTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cliente (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL,
+        direccion TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cliente_telefono (
+        id_cliente INTEGER NOT NULL,
+        telefono TEXT NOT NULL,
+        PRIMARY KEY (id_cliente, telefono),
+        FOREIGN KEY (id_cliente) REFERENCES cliente(id)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cliente_correo (
+        id_cliente INTEGER NOT NULL,
+        correo TEXT NOT NULL,
+        PRIMARY KEY (id_cliente, correo),
+        FOREIGN KEY (id_cliente) REFERENCES cliente(id)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vehiculo (
+        vin TEXT PRIMARY KEY,
+        marca TEXT NOT NULL,
+        modelo TEXT NOT NULL,
+        color TEXT,
+        kilometraje INTEGER DEFAULT 0,
+        anio INTEGER,
+        placas TEXT,
+        id_cliente INTEGER NOT NULL,
+        FOREIGN KEY (id_cliente) REFERENCES cliente(id)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS orden_servicio (
+        no_orden INTEGER PRIMARY KEY AUTOINCREMENT,
+        descripcion_falla TEXT NOT NULL,
+        fecha_ingreso TEXT NOT NULL,
+        fecha_salida TEXT,
+        estado TEXT NOT NULL CHECK(estado IN ('En Proceso', 'Finalizado', 'Cancelado')) DEFAULT 'En Proceso',
+        kilometraje_ingreso INTEGER,
+        gasolina TEXT,
+        observaciones TEXT,
+        subtotal REAL DEFAULT 0,
+        impuesto REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        vin TEXT NOT NULL,
+        FOREIGN KEY (vin) REFERENCES vehiculo(vin)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS orden_accesorios (
+        no_orden INTEGER NOT NULL,
+        accesorio TEXT NOT NULL,
+        presente INTEGER DEFAULT 1,
+        PRIMARY KEY (no_orden, accesorio),
+        FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS trabaja (
+        id_empleado INTEGER NOT NULL,
+        no_orden INTEGER NOT NULL,
+        rol TEXT,
+        PRIMARY KEY (id_empleado, no_orden),
+        FOREIGN KEY (id_empleado) REFERENCES empleado(id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+          ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<List<Usuario>> listarUsuarios() async {
@@ -116,7 +210,8 @@ class ApiService {
     final db = await _db;
     final rows = await db.query(
       'empleado',
-      where: 'lower(nombre) = lower(?) AND "contrase\u00f1a" = ? AND activo = 1',
+      where:
+          'lower(nombre) = lower(?) AND "contrase\u00f1a" = ? AND activo = 1',
       whereArgs: [nombre.trim(), contrasena],
       limit: 1,
     );
@@ -124,6 +219,28 @@ class ApiService {
       return null;
     }
     return Usuario.fromMap(rows.first);
+  }
+
+  Future<int> obtenerSiguienteNoOrden() async {
+    final db = await _db;
+    final maxRows = await db.rawQuery(
+      'SELECT COALESCE(MAX(no_orden), 0) AS max_id FROM orden_servicio',
+    );
+    final maxId = maxRows.first['max_id'] as int;
+
+    var sequenceId = 0;
+    try {
+      final sequenceRows = await db.rawQuery(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'orden_servicio'",
+      );
+      if (sequenceRows.isNotEmpty) {
+        sequenceId = sequenceRows.first['seq'] as int;
+      }
+    } catch (_) {
+      sequenceId = 0;
+    }
+
+    return (maxId > sequenceId ? maxId : sequenceId) + 1;
   }
 
   Future<Usuario> crearUsuario(Usuario usuario) async {
@@ -154,6 +271,102 @@ class ApiService {
   Future<void> eliminarUsuario(int id) async {
     final db = await _db;
     await db.delete('empleado', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> guardarOrdenServicio({
+    required int noOrden,
+    required String clienteNombre,
+    required String clienteDireccion,
+    required String clienteTelefono,
+    required String clienteCorreo,
+    required String vehiculoVin,
+    required String vehiculoMarca,
+    required String vehiculoModelo,
+    required String vehiculoColor,
+    required int? vehiculoAnio,
+    required String vehiculoPlacas,
+    required String descripcionFalla,
+    required String fechaIngreso,
+    required String fechaSalida,
+    required int? kilometrajeIngreso,
+    required String gasolina,
+    required Map<String, bool> accesorios,
+    required Map<int, String> empleadosAsignados,
+  }) async {
+    final db = await _db;
+    return db.transaction<int>((txn) async {
+      final clienteId = await txn.insert('cliente', {
+        'nombre': clienteNombre.trim(),
+        'direccion': clienteDireccion.trim(),
+      });
+
+      final telefono = clienteTelefono.trim();
+      if (telefono.isNotEmpty) {
+        await txn.insert('cliente_telefono', {
+          'id_cliente': clienteId,
+          'telefono': telefono,
+        });
+      }
+
+      final correo = clienteCorreo.trim();
+      if (correo.isNotEmpty) {
+        await txn.insert('cliente_correo', {
+          'id_cliente': clienteId,
+          'correo': correo,
+        });
+      }
+
+      final vin = vehiculoVin.trim();
+      final vehiculoMap = {
+        'vin': vin,
+        'marca': vehiculoMarca.trim(),
+        'modelo': vehiculoModelo.trim(),
+        'color': vehiculoColor.trim(),
+        'kilometraje': kilometrajeIngreso ?? 0,
+        'anio': vehiculoAnio,
+        'placas': vehiculoPlacas.trim(),
+        'id_cliente': clienteId,
+      };
+      final updatedVehicles = await txn.update(
+        'vehiculo',
+        vehiculoMap,
+        where: 'vin = ?',
+        whereArgs: [vin],
+      );
+      if (updatedVehicles == 0) {
+        await txn.insert('vehiculo', vehiculoMap);
+      }
+
+      final orderId = await txn.insert('orden_servicio', {
+        'no_orden': noOrden,
+        'descripcion_falla': descripcionFalla.trim(),
+        'fecha_ingreso': fechaIngreso.trim(),
+        'fecha_salida': fechaSalida.trim().isEmpty ? null : fechaSalida.trim(),
+        'estado': 'En Proceso',
+        'kilometraje_ingreso': kilometrajeIngreso,
+        'gasolina': gasolina,
+        'observaciones': '',
+        'vin': vin,
+      });
+
+      for (final entry in accesorios.entries) {
+        await txn.insert('orden_accesorios', {
+          'no_orden': orderId,
+          'accesorio': entry.key,
+          'presente': entry.value ? 1 : 0,
+        });
+      }
+
+      for (final entry in empleadosAsignados.entries) {
+        await txn.insert('trabaja', {
+          'id_empleado': entry.key,
+          'no_orden': orderId,
+          'rol': entry.value,
+        });
+      }
+
+      return orderId;
+    });
   }
 
   Map<String, Object?> _toEmpleadoMap(

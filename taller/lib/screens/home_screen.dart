@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/usuario.dart';
 import '../widgets/custom_button.dart';
 import 'service_order_screen.dart';
 import 'user_management_screen.dart';
@@ -21,7 +22,9 @@ class AppColors {
 }
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({super.key, this.currentUser});
+
+  final Usuario? currentUser;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -59,10 +62,9 @@ class _MainShellState extends State<MainShell> {
           IconButton(
             tooltip: 'Cerrar sesion',
             onPressed: () {
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                '/',
-                (route) => false,
-              );
+              Navigator.of(
+                context,
+              ).pushNamedAndRemoveUntil('/', (route) => false);
             },
             icon: const Icon(Icons.logout_outlined),
           ),
@@ -106,7 +108,7 @@ class _MainShellState extends State<MainShell> {
                   description:
                       'Listado con prioridades, estado del vehiculo y filtros por fecha, cliente o urgencia.',
                 ),
-                const ServiceOrderScreen(),
+                ServiceOrderScreen(currentUser: widget.currentUser),
                 const ModulePlaceholder(
                   icon: Icons.qr_code_2_outlined,
                   title: 'Vista del cliente',
