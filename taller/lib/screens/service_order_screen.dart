@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/usuario.dart';
 import '../services/api_service.dart';
@@ -7,9 +8,10 @@ import '../widgets/custom_button.dart';
 import 'home_screen.dart';
 
 class ServiceOrderScreen extends StatefulWidget {
-  const ServiceOrderScreen({super.key, this.currentUser});
+  const ServiceOrderScreen({super.key, this.currentUser, this.onOrderSaved});
 
   final Usuario? currentUser;
+  final VoidCallback? onOrderSaved;
 
   @override
   State<ServiceOrderScreen> createState() => _ServiceOrderScreenState();
@@ -74,6 +76,7 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   @override
   void initState() {
     super.initState();
+    entryDateController.text = currentDateText();
     loadEmployees();
     loadNextOrderNumber();
   }
@@ -168,10 +171,8 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
         return;
       }
 
-      setState(() {
-        orderSaved = true;
-        orderController.text = formatOrderNumber(orderId);
-      });
+      clearForm();
+      widget.onOrderSaved?.call();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -195,6 +196,20 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   void clearForm() {
     formKey.currentState?.reset();
     setState(() {
+      nameController.clear();
+      addressController.clear();
+      phoneController.clear();
+      emailController.clear();
+      orderController.clear();
+      deliveryDateController.clear();
+      brandController.clear();
+      modelController.clear();
+      yearController.clear();
+      colorController.clear();
+      plateController.clear();
+      vinController.clear();
+      mileageController.clear();
+      faultController.clear();
       for (final key in inventory.keys) {
         inventory[key] = false;
       }
@@ -204,6 +219,8 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
       authorizeTestDrive = false;
       acceptsTerms = false;
       orderSaved = false;
+      previewOrderId = null;
+      entryDateController.text = currentDateText();
       assignedEmployees.clear();
       final currentId = currentEmployeeId;
       if (currentId != null) {
@@ -228,6 +245,13 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   }
 
   String formatOrderNumber(int id) => 'OT-$id';
+
+  String currentDateText() {
+    final now = DateTime.now();
+    final day = now.day.toString().padLeft(2, '0');
+    final month = now.month.toString().padLeft(2, '0');
+    return '$day/$month/${now.year}';
+  }
 
   Future<void> loadEmployees() async {
     final loaded = await ApiService.instance.listarUsuarios();
@@ -301,6 +325,11 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
           content: Text('Generando numero de orden, intenta de nuevo.'),
         ),
       );
+      return;
+    }
+
+    final valid = formKey.currentState?.validate() ?? false;
+    if (!valid) {
       return;
     }
 
@@ -434,12 +463,13 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
                 controller: faultController,
                 minLines: 5,
                 maxLines: 8,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 decoration: const InputDecoration(
                   hintText:
                       'Describe los sintomas, ruidos, condiciones y observaciones del cliente.',
                   border: OutlineInputBorder(),
                 ),
-                validator: requiredField,
+                validator: failureValidator,
               ),
             ),
             const SizedBox(height: 16),
@@ -615,19 +645,28 @@ class CustomerSection extends StatelessWidget {
           AppTextField(
             label: 'Nombre',
             controller: nameController,
-            validator: requiredField,
+            textCapitalization: TextCapitalization.words,
+            validator: customerNameValidator,
           ),
-          AppTextField(label: 'Direccion', controller: addressController),
+          AppTextField(
+            label: 'Direccion',
+            controller: addressController,
+            validator: optionalAddressValidator,
+          ),
           AppTextField(
             label: 'Telefono',
             controller: phoneController,
             keyboardType: TextInputType.phone,
-            validator: requiredField,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-() ]')),
+            ],
+            validator: phoneValidator,
           ),
           AppTextField(
             label: 'Email',
             controller: emailController,
             keyboardType: TextInputType.emailAddress,
+            validator: optionalEmailValidator,
           ),
         ],
       ),
@@ -664,12 +703,22 @@ class OrderMetaSection extends StatelessWidget {
             label: 'Fecha de ingreso',
             controller: entryDateController,
             hintText: 'DD/MM/AAAA',
-            validator: requiredField,
+            keyboardType: TextInputType.datetime,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+            ],
+            validator: requiredDateValidator,
           ),
           AppTextField(
             label: 'Fecha de compromiso',
             controller: deliveryDateController,
             hintText: 'DD/MM/AAAA',
+            keyboardType: TextInputType.datetime,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+            ],
+            validator: (value) =>
+                optionalEndDateValidator(value, entryDateController.text),
           ),
         ],
       ),
@@ -1001,28 +1050,47 @@ class VehicleSection extends StatelessWidget {
             AppTextField(
               label: 'Marca',
               controller: brandController,
-              validator: requiredField,
+              textCapitalization: TextCapitalization.words,
+              validator: vehicleTextValidator,
             ),
             AppTextField(
               label: 'Modelo',
               controller: modelController,
-              validator: requiredField,
+              textCapitalization: TextCapitalization.words,
+              validator: vehicleTextValidator,
             ),
             AppTextField(
-              label: 'Ano',
+              label: 'Año',
               controller: yearController,
               keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              validator: optionalYearValidator,
             ),
-            AppTextField(label: 'Color', controller: colorController),
+            AppTextField(
+              label: 'Color',
+              controller: colorController,
+              textCapitalization: TextCapitalization.words,
+              validator: optionalShortTextValidator,
+            ),
             AppTextField(
               label: 'Placas',
               controller: plateController,
-              validator: requiredField,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [
+                UpperCaseTextFormatter(),
+                FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9\- ]')),
+              ],
+              validator: plateValidator,
             ),
             AppTextField(
               label: 'VIN',
               controller: vinController,
-              validator: requiredField,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [
+                UpperCaseTextFormatter(),
+                FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9]')),
+              ],
+              validator: vinValidator,
             ),
           ];
 
@@ -1153,6 +1221,8 @@ class VehicleStatusPanel extends StatelessWidget {
                 label: 'Kilometraje',
                 controller: mileageController,
                 keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                validator: optionalMileageValidator,
               );
               final fuel = FuelLevelControl(
                 fuelLevel: fuelLevel,
@@ -1471,6 +1541,8 @@ class AppTextField extends StatelessWidget {
     this.hintText,
     this.keyboardType,
     this.validator,
+    this.inputFormatters,
+    this.textCapitalization = TextCapitalization.none,
     this.obscureText = false,
     this.readOnly = false,
   });
@@ -1480,6 +1552,8 @@ class AppTextField extends StatelessWidget {
   final String? hintText;
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextCapitalization textCapitalization;
   final bool obscureText;
   final bool readOnly;
 
@@ -1491,6 +1565,9 @@ class AppTextField extends StatelessWidget {
         controller: controller,
         keyboardType: keyboardType,
         validator: validator,
+        inputFormatters: inputFormatters,
+        textCapitalization: textCapitalization,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
         obscureText: obscureText,
         readOnly: readOnly,
         decoration: InputDecoration(
@@ -1509,4 +1586,213 @@ String? requiredField(String? value) {
     return 'Campo requerido';
   }
   return null;
+}
+
+String? customerNameValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+
+  final text = value!.trim();
+  if (text.length < 3) {
+    return 'Ingresa al menos 3 caracteres';
+  }
+  if (!RegExp(r"^[A-Za-zÁÉÍÓÚáéíóúÑñÜü .'-]+$").hasMatch(text)) {
+    return 'Ingresa un nombre valido';
+  }
+  return null;
+}
+
+String? optionalAddressValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+  if (text.length < 5) {
+    return 'La direccion es muy corta';
+  }
+  return null;
+}
+
+String? phoneValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+
+  final digits = value!.replaceAll(RegExp(r'\D'), '');
+  if (digits.length < 8 || digits.length > 15) {
+    return 'Ingresa un telefono valido';
+  }
+  return null;
+}
+
+String? optionalEmailValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+
+  final valid = RegExp(
+    r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$',
+  ).hasMatch(text);
+  if (!valid) {
+    return 'Ingresa un email valido';
+  }
+  return null;
+}
+
+String? requiredDateValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+  if (parseLocalDate(value!.trim()) == null) {
+    return 'Usa el formato DD/MM/AAAA';
+  }
+  return null;
+}
+
+String? optionalEndDateValidator(String? value, String startValue) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+
+  final endDate = parseLocalDate(text);
+  if (endDate == null) {
+    return 'Usa el formato DD/MM/AAAA';
+  }
+
+  final startDate = parseLocalDate(startValue.trim());
+  if (startDate != null && endDate.isBefore(startDate)) {
+    return 'No puede ser antes del ingreso';
+  }
+  return null;
+}
+
+String? vehicleTextValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+  if (value!.trim().length < 2) {
+    return 'Ingresa un valor valido';
+  }
+  return null;
+}
+
+String? optionalShortTextValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+  if (text.length < 2) {
+    return 'Ingresa al menos 2 caracteres';
+  }
+  return null;
+}
+
+String? optionalYearValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+
+  if (text.length != 4) {
+    return 'Ingresa un año de 4 digitos';
+  }
+
+  final year = int.tryParse(text);
+  final maxYear = DateTime.now().year + 1;
+  if (year == null || year < 1900 || year > maxYear) {
+    return 'Ingresa un año valido';
+  }
+  return null;
+}
+
+String? plateValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+
+  final text = value!.trim().toUpperCase();
+  if (text.length < 3 || text.length > 12) {
+    return 'Ingresa una placa valida';
+  }
+  if (!RegExp(r'^[A-Z0-9\- ]+$').hasMatch(text)) {
+    return 'Solo letras, numeros y guiones';
+  }
+  return null;
+}
+
+String? vinValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+
+  final text = value!.trim().toUpperCase();
+  if (text.length != 17) {
+    return 'El VIN debe tener 17 caracteres';
+  }
+  if (!RegExp(r'^[A-HJ-NPR-Z0-9]{17}$').hasMatch(text)) {
+    return 'VIN invalido: no usa I, O ni Q';
+  }
+  return null;
+}
+
+String? optionalMileageValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+
+  final mileage = int.tryParse(text);
+  if (mileage == null || mileage < 0 || mileage > 2000000) {
+    return 'Ingresa un kilometraje valido';
+  }
+  return null;
+}
+
+String? failureValidator(String? value) {
+  final required = requiredField(value);
+  if (required != null) {
+    return required;
+  }
+  if (value!.trim().length < 10) {
+    return 'Describe la falla con mas detalle';
+  }
+  return null;
+}
+
+DateTime? parseLocalDate(String value) {
+  final match = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$').firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+
+  final day = int.parse(match.group(1)!);
+  final month = int.parse(match.group(2)!);
+  final year = int.parse(match.group(3)!);
+  final date = DateTime(year, month, day);
+  if (date.day != day || date.month != month || date.year != year) {
+    return null;
+  }
+  return date;
+}
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(
+      text: newValue.text.toUpperCase(),
+      composing: TextRange.empty,
+    );
+  }
 }

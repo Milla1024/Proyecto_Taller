@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -54,61 +55,40 @@ class ServiceOrderPrintData {
 
 Future<void> printServiceOrder(ServiceOrderPrintData data) async {
   final document = pw.Document();
+  final logoImage = await _loadLogoImage();
+  final vehicleImage = await _loadVehicleImage();
 
   document.addPage(
-    pw.MultiPage(
+    pw.Page(
       pageFormat: PdfPageFormat.letter,
-      margin: const pw.EdgeInsets.all(28),
-      build: (context) => [
-        _header(data),
-        pw.SizedBox(height: 12),
-        _section('DATOS DEL CLIENTE', [
-          ['Nombre', data.customerName],
-          ['Direccion', data.customerAddress],
-          ['Telefono', data.customerPhone],
-          ['Email', data.customerEmail],
-        ]),
-        pw.SizedBox(height: 8),
-        _section('DATOS DE ORDEN', [
-          ['No. orden', data.orderNumber],
-          ['Fecha de ingreso', data.entryDate],
-          ['Fecha de compromiso', data.deliveryDate],
-        ]),
-        pw.SizedBox(height: 8),
-        _section('DATOS DEL VEHICULO', [
-          ['Marca', data.vehicleBrand],
-          ['Modelo', data.vehicleModel],
-          ['Ano', data.vehicleYear],
-          ['Color', data.vehicleColor],
-          ['Placas', data.vehiclePlate],
-          ['VIN', data.vehicleVin],
-          ['Kilometraje', data.mileage],
-          ['Gasolina', data.fuelLevel],
-        ]),
-        pw.SizedBox(height: 8),
-        _textBox('DESCRIPCION DE LA FALLA', data.failureDescription),
-        pw.SizedBox(height: 8),
-        _accessoryTable(data.accessories),
-        pw.SizedBox(height: 8),
-        _listBox('EMPLEADOS ASIGNADOS', data.assignedEmployees),
-        pw.SizedBox(height: 8),
-        _authorizationBox(data),
-        pw.SizedBox(height: 34),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.end,
-          children: [
-            pw.Container(
-              width: 220,
+      margin: const pw.EdgeInsets.fromLTRB(18, 16, 18, 16),
+      build: (context) {
+        return pw.DefaultTextStyle(
+          style: const pw.TextStyle(fontSize: 8),
+          child: pw.Align(
+            alignment: pw.Alignment.topLeft,
+            child: pw.Container(
+              width: 552,
               child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                 children: [
-                  pw.Divider(color: PdfColors.black),
-                  pw.Text('FIRMA DEL CLIENTE'),
+                  _header(logoImage),
+                  pw.SizedBox(height: 8),
+                  _topData(data),
+                  pw.SizedBox(height: 8),
+                  _vehicleTable(data),
+                  pw.SizedBox(height: 8),
+                  _failureBox(data.failureDescription),
+                  pw.SizedBox(height: 8),
+                  _receptionBox(data, vehicleImage),
+                  pw.SizedBox(height: 8),
+                  _footer(data),
                 ],
               ),
             ),
-          ],
-        ),
-      ],
+          ),
+        );
+      },
     ),
   );
 
@@ -118,157 +98,321 @@ Future<void> printServiceOrder(ServiceOrderPrintData data) async {
   );
 }
 
-pw.Widget _header(ServiceOrderPrintData data) {
+Future<pw.MemoryImage?> _loadVehicleImage() async {
+  try {
+    final bytes = await rootBundle.load(
+      'assets/images/vehiculo_inspeccion.png',
+    );
+    return pw.MemoryImage(bytes.buffer.asUint8List());
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<pw.MemoryImage?> _loadLogoImage() async {
+  try {
+    final bytes = await rootBundle.load('assets/images/pit_stop_logo.png');
+    return pw.MemoryImage(bytes.buffer.asUint8List());
+  } catch (_) {
+    return null;
+  }
+}
+
+pw.Widget _header(pw.MemoryImage? logoImage) {
   return pw.Row(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     children: [
       pw.Container(
-        width: 72,
-        height: 58,
-        alignment: pw.Alignment.center,
-        decoration: pw.BoxDecoration(border: pw.Border.all()),
-        child: pw.Text('LOGO'),
+        width: 150,
+        height: 70,
+        child: pw.Row(
+          children: [
+            pw.Container(
+              width: 92,
+              height: 62,
+              alignment: pw.Alignment.center,
+              child: logoImage == null
+                  ? pw.Container(
+                      alignment: pw.Alignment.center,
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border.all(
+                          color: PdfColors.grey500,
+                          width: 1,
+                        ),
+                      ),
+                      child: pw.Text(
+                        'LOGO',
+                        style: const pw.TextStyle(
+                          color: PdfColors.grey500,
+                          fontSize: 18,
+                        ),
+                      ),
+                    )
+                  : pw.Image(logoImage, fit: pw.BoxFit.contain),
+            ),
+          ],
+        ),
       ),
       pw.SizedBox(width: 18),
       pw.Expanded(
         child: pw.Column(
           children: [
+            pw.SizedBox(height: 24),
             pw.Text(
               'Orden de Servicio',
-              style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+              style: const pw.TextStyle(fontSize: 24),
             ),
-            pw.SizedBox(height: 4),
-            pw.Text('No. ${data.orderNumber}'),
           ],
         ),
       ),
       pw.SizedBox(width: 18),
-      pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.end,
-        children: [
-          pw.Text(
-            'Nombre de Taller',
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-          ),
-          pw.Text('Direccion'),
-        ],
+      pw.Container(
+        width: 150,
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Taller PitStop',
+              textAlign: pw.TextAlign.right,
+              style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 17),
+            ),
+            pw.Text(
+              'Gracias Lempira',
+              textAlign: pw.TextAlign.right,
+              style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     ],
   );
 }
 
-pw.Widget _section(String title, List<List<String>> rows) {
-  return pw.Container(
-    decoration: pw.BoxDecoration(border: pw.Border.all()),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        _sectionTitle(title),
-        pw.Padding(
-          padding: const pw.EdgeInsets.all(8),
-          child: pw.Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            children: [
-              for (final row in rows)
-                pw.Container(
-                  width: 230,
-                  child: pw.Text('${row[0]}: ${row[1].isEmpty ? '-' : row[1]}'),
-                ),
-            ],
+pw.Widget _topData(ServiceOrderPrintData data) {
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Expanded(
+        flex: 3,
+        child: _boxedSection(
+          title: 'DATOS DEL CLIENTE',
+          height: 108,
+          child: pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(10, 10, 12, 8),
+            child: pw.Column(
+              children: [
+                _lineField('NOMBRE:', data.customerName),
+                _lineField('DIRECCION:', data.customerAddress),
+                _lineField('TELEFONO:', data.customerPhone),
+                _lineField('EMAIL:', data.customerEmail),
+              ],
+            ),
           ),
         ),
-      ],
-    ),
-  );
-}
-
-pw.Widget _textBox(String title, String value) {
-  return pw.Container(
-    decoration: pw.BoxDecoration(border: pw.Border.all()),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        _sectionTitle(title),
-        pw.Container(
-          constraints: const pw.BoxConstraints(minHeight: 82),
-          padding: const pw.EdgeInsets.all(8),
-          child: pw.Text(value.isEmpty ? '-' : value),
-        ),
-      ],
-    ),
-  );
-}
-
-pw.Widget _accessoryTable(Map<String, bool> accessories) {
-  final rows = accessories.entries
-      .map((entry) => [entry.key, entry.value ? 'SI' : 'NO'])
-      .toList();
-  return pw.Container(
-    decoration: pw.BoxDecoration(border: pw.Border.all()),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        _sectionTitle('RECEPCION DEL VEHICULO'),
-        pw.TableHelper.fromTextArray(
-          headers: ['Accesorio', 'Presente'],
-          data: rows,
-          border: null,
-          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-          cellAlignment: pw.Alignment.centerLeft,
-          headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
-        ),
-      ],
-    ),
-  );
-}
-
-pw.Widget _listBox(String title, List<String> values) {
-  return pw.Container(
-    decoration: pw.BoxDecoration(border: pw.Border.all()),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        _sectionTitle(title),
-        pw.Padding(
-          padding: const pw.EdgeInsets.all(8),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              if (values.isEmpty) pw.Text('-'),
-              for (final value in values) pw.Text('- $value'),
-            ],
+      ),
+      pw.SizedBox(width: 8),
+      pw.Expanded(
+        flex: 2,
+        child: _boxedSection(
+          title: 'DATOS DE ORDEN DE SERVICIO',
+          height: 108,
+          child: pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(10, 13, 12, 8),
+            child: pw.Column(
+              children: [
+                _lineField('No. ORDEN:', data.orderNumber),
+                _lineField('FECHA DE INGRESO:', data.entryDate),
+                _lineField('FECHA DE ENTREGA:', data.deliveryDate),
+              ],
+            ),
           ),
         ),
-      ],
-    ),
+      ),
+    ],
   );
 }
 
-pw.Widget _authorizationBox(ServiceOrderPrintData data) {
-  final options = [
-    ['Solicito presupuesto previo', data.requiresQuote],
-    ['Autorizo reparacion sin presupuesto previo', data.authorizeRepair],
-    ['Autorizo conducir mi vehiculo para pruebas', data.authorizeTestDrive],
-    ['Acepto condiciones de la orden', data.acceptsTerms],
+pw.Widget _vehicleTable(ServiceOrderPrintData data) {
+  final values = [
+    data.vehicleBrand,
+    data.vehicleModel,
+    data.vehicleYear,
+    data.vehicleColor,
+    data.vehiclePlate,
+    data.vehicleVin,
   ];
 
   return pw.Container(
-    decoration: pw.BoxDecoration(border: pw.Border.all()),
+    height: 56,
+    decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
     child: pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        _sectionTitle('AUTORIZACIONES'),
-        pw.Padding(
-          padding: const pw.EdgeInsets.all(8),
+        _sectionTitle('DATOS DEL VEHICULO'),
+        pw.Table(
+          border: pw.TableBorder.all(width: 0.6),
+          columnWidths: const {
+            0: pw.FlexColumnWidth(1.1),
+            1: pw.FlexColumnWidth(1.3),
+            2: pw.FlexColumnWidth(0.7),
+            3: pw.FlexColumnWidth(1),
+            4: pw.FlexColumnWidth(0.9),
+            5: pw.FlexColumnWidth(1.8),
+          },
+          children: [
+            pw.TableRow(
+              children: [
+                _tableHeader('MARCA'),
+                _tableHeader('MODELO'),
+                _tableHeader('ANO'),
+                _tableHeader('COLOR'),
+                _tableHeader('PLACAS'),
+                _tableHeader('VIN'),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                for (final value in values)
+                  pw.Container(
+                    height: 18,
+                    alignment: pw.Alignment.center,
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 3),
+                    child: pw.Text(value),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+pw.Widget _failureBox(String value) {
+  return _boxedSection(
+    title: 'DESCRIPCION DE LA FALLA',
+    height: 122,
+    child: pw.Padding(
+      padding: const pw.EdgeInsets.all(8),
+      child: pw.Text(value),
+    ),
+  );
+}
+
+pw.Widget _receptionBox(
+  ServiceOrderPrintData data,
+  pw.MemoryImage? vehicleImage,
+) {
+  final entries = data.accessories.entries.toList();
+  final left = entries.take((entries.length / 2).ceil()).toList();
+  final right = entries.skip((entries.length / 2).ceil()).toList();
+
+  return _boxedSection(
+    title: 'RECEPCION DEL VEHICULO',
+    height: 214,
+    child: pw.Padding(
+      padding: const pw.EdgeInsets.fromLTRB(10, 10, 10, 8),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(child: _accessoryColumn(left)),
+          pw.SizedBox(width: 10),
+          pw.Expanded(child: _accessoryColumn(right)),
+          pw.SizedBox(width: 12),
+          pw.Container(
+            width: 230,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                _lineField('Kilometraje', data.mileage),
+                pw.SizedBox(height: 8),
+                _fuelLine(data.fuelLevel),
+                pw.SizedBox(height: 10),
+                pw.Expanded(child: _vehicleImage(vehicleImage)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+pw.Widget _footer(ServiceOrderPrintData data) {
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Expanded(
+        flex: 3,
+        child: pw.Container(
+          height: 108,
+          padding: const pw.EdgeInsets.fromLTRB(10, 8, 10, 8),
+          decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              for (final option in options)
-                pw.Text('[${option[1] == true ? 'X' : ' '}] ${option[0]}'),
+              _optionLine(
+                data.requiresQuote,
+                'Solicito presupuesto previo antes de autorizar el trabajo',
+              ),
+              _optionLine(
+                data.authorizeRepair,
+                'Autorizo realizar reparacion sin presupuesto previo',
+              ),
+              _optionLine(
+                data.authorizeTestDrive,
+                'Autorizo para conducir mi vehiculo para pruebas',
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'El Taller y sus empleados no se responsabilizan por objetos '
+                'dejados dentro del vehiculo y que no hayan sido inventariados '
+                'y entregados al recepcionista.',
+                style: const pw.TextStyle(fontSize: 9),
+              ),
             ],
           ),
         ),
+      ),
+      pw.SizedBox(width: 8),
+      pw.Expanded(
+        flex: 2,
+        child: pw.Container(
+          height: 108,
+          padding: const pw.EdgeInsets.fromLTRB(12, 12, 12, 8),
+          decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
+          child: pw.Column(
+            children: [
+              pw.Text(
+                'Acepto las condiciones expresamente indicadas en esta Orden de Servicio',
+                textAlign: pw.TextAlign.center,
+                style: const pw.TextStyle(fontSize: 9),
+              ),
+              pw.Spacer(),
+              pw.Divider(thickness: 0.8),
+              pw.Text('CLIENTE', style: const pw.TextStyle(fontSize: 9)),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+pw.Widget _boxedSection({
+  required String title,
+  required double height,
+  required pw.Widget child,
+}) {
+  return pw.Container(
+    height: height,
+    decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        _sectionTitle(title),
+        pw.Expanded(child: child),
       ],
     ),
   );
@@ -276,12 +420,179 @@ pw.Widget _authorizationBox(ServiceOrderPrintData data) {
 
 pw.Widget _sectionTitle(String title) {
   return pw.Container(
-    color: PdfColors.grey200,
-    padding: const pw.EdgeInsets.symmetric(vertical: 5, horizontal: 8),
-    child: pw.Text(
-      title,
-      textAlign: pw.TextAlign.center,
-      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+    height: 22,
+    alignment: pw.Alignment.center,
+    decoration: pw.BoxDecoration(
+      color: PdfColors.grey200,
+      border: pw.Border(bottom: pw.BorderSide(width: 0.7)),
+    ),
+    child: pw.Text(title, style: const pw.TextStyle(fontSize: 9)),
+  );
+}
+
+pw.Widget _lineField(String label, String value) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.only(bottom: 8),
+    child: pw.Row(
+      children: [
+        pw.Container(
+          width: label.length > 12 ? 84 : 60,
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.Container(
+            height: 12,
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(bottom: pw.BorderSide(width: 0.6)),
+            ),
+            child: pw.Padding(
+              padding: const pw.EdgeInsets.only(left: 3, bottom: 1),
+              child: pw.Text(value),
+            ),
+          ),
+        ),
+      ],
     ),
   );
+}
+
+pw.Widget _tableHeader(String text) {
+  return pw.Container(
+    height: 15,
+    alignment: pw.Alignment.center,
+    child: pw.Text(text, style: const pw.TextStyle(fontSize: 7)),
+  );
+}
+
+pw.Widget _accessoryColumn(List<MapEntry<String, bool>> entries) {
+  return pw.Column(
+    children: [
+      pw.Row(
+        children: [
+          pw.Expanded(child: pw.SizedBox()),
+          pw.Container(
+            width: 18,
+            alignment: pw.Alignment.center,
+            child: pw.Text('SI'),
+          ),
+          pw.Container(
+            width: 18,
+            alignment: pw.Alignment.center,
+            child: pw.Text('NO'),
+          ),
+        ],
+      ),
+      pw.SizedBox(height: 2),
+      for (final entry in entries)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 4),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Text(
+                  entry.key,
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ),
+              pw.Container(
+                width: 18,
+                alignment: pw.Alignment.center,
+                child: _checkBox(entry.value),
+              ),
+              pw.Container(
+                width: 18,
+                alignment: pw.Alignment.center,
+                child: _checkBox(!entry.value),
+              ),
+            ],
+          ),
+        ),
+    ],
+  );
+}
+
+pw.Widget _checkBox(bool checked) {
+  return pw.Container(
+    width: 11,
+    height: 11,
+    alignment: pw.Alignment.center,
+    decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.7)),
+    child: checked
+        ? pw.Text(
+            'X',
+            style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+          )
+        : pw.SizedBox(),
+  );
+}
+
+pw.Widget _fuelLine(String fuelLevel) {
+  final percent = _fuelPercent(fuelLevel);
+  const barWidth = 112.0;
+
+  return pw.Row(
+    children: [
+      pw.Text('Gasolina', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+      pw.SizedBox(width: 8),
+      pw.Text('V'),
+      pw.SizedBox(width: 4),
+      pw.Container(
+        width: barWidth,
+        height: 7,
+        decoration: pw.BoxDecoration(
+          color: PdfColors.grey200,
+          border: pw.Border.all(color: PdfColors.grey300, width: 0.3),
+        ),
+        child: pw.Align(
+          alignment: pw.Alignment.centerLeft,
+          child: pw.Container(
+            width: barWidth * percent,
+            height: 7,
+            color: PdfColors.grey600,
+          ),
+        ),
+      ),
+      pw.SizedBox(width: 4),
+      pw.Text('LL'),
+    ],
+  );
+}
+
+pw.Widget _vehicleImage(pw.MemoryImage? image) {
+  if (image == null) {
+    return pw.Center(child: pw.Text('Imagen del vehiculo'));
+  }
+
+  return pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain));
+}
+
+pw.Widget _optionLine(bool checked, String text) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.only(bottom: 4),
+    child: pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        _checkBox(checked),
+        pw.SizedBox(width: 8),
+        pw.Expanded(
+          child: pw.Text(text, style: const pw.TextStyle(fontSize: 9)),
+        ),
+      ],
+    ),
+  );
+}
+
+double _fuelPercent(String fuelLevel) {
+  final digits = RegExp(r'\d+').firstMatch(fuelLevel)?.group(0);
+  final value = int.tryParse(digits ?? '') ?? 0;
+  if (value <= 0) {
+    return 0;
+  }
+  if (value >= 100) {
+    return 1;
+  }
+  return value / 100;
 }

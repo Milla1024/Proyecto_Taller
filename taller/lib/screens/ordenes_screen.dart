@@ -8,9 +8,10 @@ import 'home_screen.dart';
 import 'orden_detalle_screen.dart';
 
 class OrdenesScreen extends StatefulWidget {
-  const OrdenesScreen({super.key, this.currentUser});
+  const OrdenesScreen({super.key, this.currentUser, this.refreshToken = 0});
 
   final Usuario? currentUser;
+  final int refreshToken;
 
   @override
   State<OrdenesScreen> createState() => _OrdenesScreenState();
@@ -25,6 +26,15 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   void initState() {
     super.initState();
     _cargarOrdenes();
+  }
+
+  @override
+  void didUpdateWidget(covariant OrdenesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken ||
+        oldWidget.currentUser?.id != widget.currentUser?.id) {
+      _cargarOrdenes();
+    }
   }
 
   Future<void> _cargarOrdenes() async {
@@ -164,7 +174,8 @@ class OrdenesTable extends StatelessWidget {
                 children: [
                   const OrdenesTableHeaderRow(),
                   for (var i = 0; i < ordenes.length; i++) ...[
-                    if (i > 0) const Divider(height: 1, color: AppColors.border),
+                    if (i > 0)
+                      const Divider(height: 1, color: AppColors.border),
                     OrdenesTableRow(
                       orden: ordenes[i],
                       onTap: () => onTap(ordenes[i].noOrden),
@@ -206,7 +217,11 @@ class OrdenesTableHeaderRow extends StatelessWidget {
           Expanded(flex: 2, child: Text('ESTADO', style: _headerStyle)),
           SizedBox(
             width: 100,
-            child: Text('TOTAL', style: _headerStyle, textAlign: TextAlign.right),
+            child: Text(
+              'TOTAL',
+              style: _headerStyle,
+              textAlign: TextAlign.right,
+            ),
           ),
         ],
       ),
@@ -411,7 +426,10 @@ Urgencia _urgenciaDe(OrdenServicio orden) {
 }
 
 String _textoEntregaDe(OrdenServicio orden) {
-  return textoEntrega(estado: orden.estado, fechaCompromiso: orden.fechaCompromiso);
+  return textoEntrega(
+    estado: orden.estado,
+    fechaCompromiso: orden.fechaCompromiso,
+  );
 }
 
 Color colorDeEstado(String estado) {

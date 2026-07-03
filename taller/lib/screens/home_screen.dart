@@ -33,6 +33,7 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int selectedIndex = 0;
+  int ordenesRefreshToken = 0;
 
   bool get _isAdmin => widget.currentUser?.rol == 'Administrador';
 
@@ -111,8 +112,19 @@ class _MainShellState extends State<MainShell> {
                   onOpenUsuarios: () => setState(() => selectedIndex = 5),
                   showUsuarios: _isAdmin,
                 ),
-                OrdenesScreen(currentUser: widget.currentUser),
-                ServiceOrderScreen(currentUser: widget.currentUser),
+                OrdenesScreen(
+                  currentUser: widget.currentUser,
+                  refreshToken: ordenesRefreshToken,
+                ),
+                ServiceOrderScreen(
+                  currentUser: widget.currentUser,
+                  onOrderSaved: () {
+                    setState(() {
+                      ordenesRefreshToken++;
+                      selectedIndex = 0;
+                    });
+                  },
+                ),
                 const ModulePlaceholder(
                   icon: Icons.qr_code_2_outlined,
                   title: 'Vista del cliente',

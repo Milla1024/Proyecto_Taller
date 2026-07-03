@@ -346,7 +346,7 @@ class VehiculoDetalleSection extends StatelessWidget {
             value: '${detalle.vehiculoMarca} ${detalle.vehiculoModelo}',
           ),
           ProfileField(
-            label: 'Ano',
+            label: 'Año',
             value: detalle.vehiculoAnio?.toString() ?? '—',
           ),
           ProfileField(label: 'Color', value: _mostrar(detalle.vehiculoColor)),
