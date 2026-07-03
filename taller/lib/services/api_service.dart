@@ -51,15 +51,19 @@ class ApiService {
 
   Future<void> _prepareDatabase(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
+    await _prepareEmpleadoTable(db);
+    await _prepareServiceOrderTables(db);
+  }
+
+  Future<void> _prepareEmpleadoTable(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS empleado (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         puesto TEXT NOT NULL,
         telefono TEXT,
-        "contrase\u00f1a" TEXT NOT NULL,
-        activo INTEGER DEFAULT 1,
-        numero_empleado TEXT
+        contrasena TEXT NOT NULL,
+        activo INTEGER DEFAULT 1
       )
     ''');
 
@@ -67,20 +71,26 @@ class ApiService {
     final columnNames = columns
         .map((column) => column['name'] as String)
         .toSet();
+
+    final needsRebuild =
+        !columnNames.contains('contrasena') ||
+        !columnNames.contains('telefono') ||
+        !columnNames.contains('activo') ||
+        columnNames.contains('numero_empleado');
+
+    if (needsRebuild) {
+      await _rebuildEmpleadoTable(db, columnNames);
+      return;
+    }
+
     Future<void> addColumn(String name, String definition) async {
       if (!columnNames.contains(name)) {
         await db.execute('ALTER TABLE empleado ADD COLUMN $definition');
       }
     }
 
+    await addColumn('telefono', 'telefono TEXT');
     await addColumn('activo', 'activo INTEGER DEFAULT 1');
-    await addColumn('numero_empleado', 'numero_empleado TEXT');
-
-    await db.execute('''
-      UPDATE empleado
-      SET numero_empleado = printf('EMP-%03d', id)
-      WHERE numero_empleado IS NULL OR numero_empleado = ''
-    ''');
 
     final countRows = await db.rawQuery(
       'SELECT COUNT(*) AS total FROM empleado',
@@ -90,14 +100,85 @@ class ApiService {
       await db.insert('empleado', {
         'nombre': 'Prueba',
         'puesto': 'Administrador',
-        'telefono': '',
-        'contrase\u00f1a': 'admin123',
+        'telefono': '94079604',
+        'contrasena': 'admin123',
         'activo': 1,
-        'numero_empleado': 'EMP-001',
       });
     }
+  }
 
-    await _prepareServiceOrderTables(db);
+  Future<void> _rebuildEmpleadoTable(
+    Database db,
+    Set<String> columnNames,
+  ) async {
+    const legacyPasswordColumn = 'contrase\u00f1a';
+
+    await db.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await db.transaction((txn) async {
+        await txn.execute('''
+          CREATE TABLE empleado_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            puesto TEXT NOT NULL,
+            telefono TEXT,
+            contrasena TEXT NOT NULL,
+            activo INTEGER DEFAULT 1
+          )
+        ''');
+
+        final selectParts = <String>[
+          columnNames.contains('id') ? 'id' : 'NULL AS id',
+          columnNames.contains('nombre') ? 'nombre' : "'' AS nombre",
+          columnNames.contains('puesto') ? 'puesto' : "'Ayudante' AS puesto",
+          if (columnNames.contains('telefono'))
+            'telefono'
+          else if (columnNames.contains('numero_empleado'))
+            'numero_empleado AS telefono'
+          else
+            "'' AS telefono",
+          if (columnNames.contains('contrasena'))
+            'contrasena'
+          else if (columnNames.contains(legacyPasswordColumn))
+            '"$legacyPasswordColumn" AS contrasena'
+          else
+            "'123456' AS contrasena",
+          columnNames.contains('activo') ? 'activo' : '1 AS activo',
+        ];
+
+        await txn.execute('''
+          INSERT INTO empleado_new (
+            id,
+            nombre,
+            puesto,
+            telefono,
+            contrasena,
+            activo
+          )
+          SELECT ${selectParts.join(', ')}
+          FROM empleado
+        ''');
+
+        await txn.execute('DROP TABLE empleado');
+        await txn.execute('ALTER TABLE empleado_new RENAME TO empleado');
+      });
+    } finally {
+      await db.execute('PRAGMA foreign_keys = ON');
+    }
+
+    final countRows = await db.rawQuery(
+      'SELECT COUNT(*) AS total FROM empleado',
+    );
+    final count = countRows.first['total'] as int;
+    if (count == 0) {
+      await db.insert('empleado', {
+        'nombre': 'Prueba',
+        'puesto': 'Administrador',
+        'telefono': '94079604',
+        'contrasena': 'admin123',
+        'activo': 1,
+      });
+    }
   }
 
   Future<void> _prepareServiceOrderTables(Database db) async {
@@ -238,8 +319,7 @@ class ApiService {
     final db = await _db;
     final rows = await db.query(
       'empleado',
-      where:
-          'lower(nombre) = lower(?) AND "contrase\u00f1a" = ? AND activo = 1',
+      where: 'lower(nombre) = lower(?) AND contrasena = ? AND activo = 1',
       whereArgs: [nombre.trim(), contrasena],
       limit: 1,
     );
@@ -274,16 +354,7 @@ class ApiService {
   Future<Usuario> crearUsuario(Usuario usuario) async {
     final db = await _db;
     final id = await db.insert('empleado', _toEmpleadoMap(usuario));
-    final numeroEmpleado = usuario.numeroEmpleado.trim().isEmpty
-        ? 'EMP-${id.toString().padLeft(3, '0')}'
-        : usuario.numeroEmpleado.trim();
-    await db.update(
-      'empleado',
-      {'numero_empleado': numeroEmpleado},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    return usuario.copyWith(id: id, numeroEmpleado: numeroEmpleado);
+    return usuario.copyWith(id: id);
   }
 
   Future<void> actualizarUsuario(Usuario usuario) async {
@@ -548,11 +619,10 @@ class ApiService {
     return {
       'nombre': usuario.nombre.trim(),
       'puesto': usuario.rol,
-      'telefono': '',
+      'telefono': usuario.telefono.trim(),
       'activo': usuario.activo ? 1 : 0,
-      'numero_empleado': usuario.numeroEmpleado.trim(),
       if (includePassword)
-        'contrase\u00f1a': usuario.contrasena?.trim().isNotEmpty == true
+        'contrasena': usuario.contrasena?.trim().isNotEmpty == true
             ? usuario.contrasena!.trim()
             : '123456',
     };

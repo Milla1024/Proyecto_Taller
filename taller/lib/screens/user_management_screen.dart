@@ -41,7 +41,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     final normalized = query.trim().toLowerCase();
     return usuarios.where((usuario) {
       return usuario.nombre.toLowerCase().contains(normalized) ||
-          usuario.numeroEmpleado.toLowerCase().contains(normalized) ||
+          usuario.telefono.toLowerCase().contains(normalized) ||
           usuario.rol.toLowerCase().contains(normalized);
     }).toList();
   }
@@ -88,7 +88,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Eliminar empleado'),
         content: Text(
-          'Estas seguro de eliminar a ${usuario.nombre} (${usuario.numeroEmpleado})? Esta accion no se puede deshacer.',
+          'Estas seguro de eliminar a ${usuario.nombre} (${usuario.telefono})? Esta accion no se puede deshacer.',
         ),
         actions: [
           TextButton(
@@ -271,7 +271,7 @@ class UserSearchBar extends StatelessWidget {
           isDense: true,
           filled: true,
           fillColor: AppColors.panel,
-          hintText: 'Nombre, No. empleado o rol',
+          hintText: 'Nombre, telefono o rol',
           prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.slate),
           suffixIcon: controller.text.isEmpty
               ? null
@@ -382,7 +382,7 @@ class UserTableHeaderRow extends StatelessWidget {
           Expanded(flex: 5, child: Text('NOMBRE', style: _headerStyle)),
           Expanded(
             flex: 3,
-            child: Text('NUMERO DE EMPLEADO', style: _headerStyle),
+            child: Text('TELEFONO', style: _headerStyle),
           ),
           Expanded(flex: 3, child: Text('ROL', style: _headerStyle)),
           SizedBox(
@@ -427,7 +427,7 @@ class UserTableRow extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
-          Expanded(flex: 3, child: Text(usuario.numeroEmpleado)),
+          Expanded(flex: 3, child: Text(usuario.telefono)),
           Expanded(
             flex: 3,
             child: Align(
@@ -549,7 +549,7 @@ class _UserFormDialog extends StatefulWidget {
 class _UserFormDialogState extends State<_UserFormDialog> {
   final formKey = GlobalKey<FormState>();
   late final TextEditingController nombreController;
-  late final TextEditingController numeroController;
+  late final TextEditingController telefonoController;
   late final TextEditingController contrasenaController;
   late String rol;
   late bool activo;
@@ -559,7 +559,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     super.initState();
     final usuario = widget.usuario;
     nombreController = TextEditingController(text: usuario?.nombre ?? '');
-    numeroController = TextEditingController(text: usuario?.numeroEmpleado ?? '');
+    telefonoController = TextEditingController(text: usuario?.telefono ?? '');
     contrasenaController = TextEditingController();
     rol = usuario?.rol ?? _roles.first;
     activo = usuario?.activo ?? true;
@@ -568,7 +568,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
   @override
   void dispose() {
     nombreController.dispose();
-    numeroController.dispose();
+    telefonoController.dispose();
     contrasenaController.dispose();
     super.dispose();
   }
@@ -583,7 +583,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
         nombre: nombreController.text.trim(),
         rol: rol,
         activo: activo,
-        numeroEmpleado: numeroController.text.trim(),
+        telefono: telefonoController.text.trim(),
         contrasena: contrasenaController.text.trim().isEmpty
             ? null
             : contrasenaController.text.trim(),
@@ -609,8 +609,8 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                 validator: requiredField,
               ),
               AppTextField(
-                label: 'Numero de empleado',
-                controller: numeroController,
+                label: 'Telefono',
+                controller: telefonoController,
                 validator: requiredField,
               ),
               AppTextField(
@@ -703,7 +703,7 @@ class UserProfileScreen extends StatelessWidget {
                     ),
                     Center(child: RoleChip(label: usuario.rol, active: usuario.activo)),
                     const SizedBox(height: 24),
-                    ProfileField(label: 'Numero de empleado', value: usuario.numeroEmpleado),
+                    ProfileField(label: 'Telefono', value: usuario.telefono),
                     ProfileField(
                       label: 'Estado',
                       value: usuario.activo ? 'Activo' : 'Inactivo',

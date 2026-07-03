@@ -48,9 +48,10 @@ CREATE TABLE vehiculo (
 CREATE TABLE empleado (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
-    puesto TEXT NOT NULL CHECK(puesto IN ('Mecánico', 'Ayudante', 'Administrador')) ,
-    telefono TEXT
-    contraseña TEXT NOT NULL
+    puesto TEXT NOT NULL,
+    telefono TEXT,
+    contrasena TEXT NOT NULL,
+    activo INTEGER DEFAULT 1
 );
 
 CREATE TABLE orden_servicio (
