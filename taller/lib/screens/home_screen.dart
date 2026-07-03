@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/usuario.dart';
 import '../widgets/custom_button.dart';
+import 'ordenes_screen.dart';
 import 'service_order_screen.dart';
 import 'user_management_screen.dart';
 
@@ -102,12 +103,7 @@ class _MainShellState extends State<MainShell> {
                   onCreateOrder: () => setState(() => selectedIndex = 2),
                   onOpenUsuarios: () => setState(() => selectedIndex = 5),
                 ),
-                const ModulePlaceholder(
-                  icon: Icons.assignment_outlined,
-                  title: 'Ordenes activas',
-                  description:
-                      'Listado con prioridades, estado del vehiculo y filtros por fecha, cliente o urgencia.',
-                ),
+                OrdenesScreen(currentUser: widget.currentUser),
                 ServiceOrderScreen(currentUser: widget.currentUser),
                 const ModulePlaceholder(
                   icon: Icons.qr_code_2_outlined,

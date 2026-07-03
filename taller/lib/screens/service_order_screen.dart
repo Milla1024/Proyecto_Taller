@@ -156,7 +156,8 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
         vehiculoPlacas: plateController.text,
         descripcionFalla: faultController.text,
         fechaIngreso: entryDateController.text,
-        fechaSalida: deliveryDateController.text,
+        fechaCompromiso: deliveryDateController.text,
+        fechaSalida: '',
         kilometrajeIngreso: int.tryParse(mileageController.text.trim()),
         gasolina: '${(fuelLevel * 100).round()}%',
         accesorios: inventory,
@@ -666,7 +667,7 @@ class OrderMetaSection extends StatelessWidget {
             validator: requiredField,
           ),
           AppTextField(
-            label: 'Fecha de entrega',
+            label: 'Fecha de compromiso',
             controller: deliveryDateController,
             hintText: 'DD/MM/AAAA',
           ),

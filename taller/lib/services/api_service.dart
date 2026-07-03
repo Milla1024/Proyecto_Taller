@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../models/orden_servicio.dart';
 import '../models/usuario.dart';
 
 class ApiService {
@@ -161,6 +162,18 @@ class ApiService {
       )
     ''');
 
+    final ordenColumns = await db.rawQuery('PRAGMA table_info(orden_servicio)');
+    final ordenColumnNames = ordenColumns
+        .map((column) => column['name'] as String)
+        .toSet();
+    Future<void> addOrdenColumn(String name, String definition) async {
+      if (!ordenColumnNames.contains(name)) {
+        await db.execute('ALTER TABLE orden_servicio ADD COLUMN $definition');
+      }
+    }
+
+    await addOrdenColumn('fecha_compromiso', 'fecha_compromiso TEXT');
+
     await db.execute('''
       CREATE TABLE IF NOT EXISTS orden_accesorios (
         no_orden INTEGER NOT NULL,
@@ -273,6 +286,29 @@ class ApiService {
     await db.delete('empleado', where: 'id = ?', whereArgs: [id]);
   }
 
+  Future<List<OrdenServicio>> listarOrdenes() async {
+    final db = await _db;
+    final rows = await db.rawQuery('''
+      SELECT
+        os.no_orden,
+        os.descripcion_falla,
+        os.fecha_ingreso,
+        os.fecha_compromiso,
+        os.fecha_salida,
+        os.estado,
+        os.total,
+        v.marca,
+        v.modelo,
+        v.placas,
+        c.nombre AS cliente_nombre
+      FROM orden_servicio os
+      JOIN vehiculo v ON v.vin = os.vin
+      JOIN cliente c ON c.id = v.id_cliente
+      ORDER BY os.no_orden DESC
+    ''');
+    return rows.map(OrdenServicio.fromMap).toList();
+  }
+
   Future<int> guardarOrdenServicio({
     required int noOrden,
     required String clienteNombre,
@@ -287,6 +323,7 @@ class ApiService {
     required String vehiculoPlacas,
     required String descripcionFalla,
     required String fechaIngreso,
+    required String fechaCompromiso,
     required String fechaSalida,
     required int? kilometrajeIngreso,
     required String gasolina,
@@ -341,6 +378,9 @@ class ApiService {
         'no_orden': noOrden,
         'descripcion_falla': descripcionFalla.trim(),
         'fecha_ingreso': fechaIngreso.trim(),
+        'fecha_compromiso': fechaCompromiso.trim().isEmpty
+            ? null
+            : fechaCompromiso.trim(),
         'fecha_salida': fechaSalida.trim().isEmpty ? null : fechaSalida.trim(),
         'estado': 'En Proceso',
         'kilometraje_ingreso': kilometrajeIngreso,

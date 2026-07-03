@@ -72,7 +72,7 @@ Future<void> printServiceOrder(ServiceOrderPrintData data) async {
         _section('DATOS DE ORDEN', [
           ['No. orden', data.orderNumber],
           ['Fecha de ingreso', data.entryDate],
-          ['Fecha de entrega', data.deliveryDate],
+          ['Fecha de compromiso', data.deliveryDate],
         ]),
         pw.SizedBox(height: 8),
         _section('DATOS DEL VEHICULO', [
