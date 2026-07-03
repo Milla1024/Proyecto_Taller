@@ -5,6 +5,7 @@ import '../models/urgencia.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
 import 'home_screen.dart';
+import 'orden_detalle_screen.dart';
 
 class OrdenesScreen extends StatefulWidget {
   const OrdenesScreen({super.key, this.currentUser});
@@ -28,7 +29,9 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
 
   Future<void> _cargarOrdenes() async {
     try {
-      final loaded = await ApiService.instance.listarOrdenes();
+      final loaded = await ApiService.instance.listarOrdenes(
+        idEmpleado: esVistaTabla ? null : widget.currentUser!.id,
+      );
       if (!mounted) {
         return;
       }
@@ -52,11 +55,20 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
 
   List<OrdenServicio> get ordenadasPorUrgencia {
     final copia = [...ordenes];
-    copia.sort(
-      (a, b) =>
-          calcularUrgencia(a).index.compareTo(calcularUrgencia(b).index),
-    );
+    copia.sort((a, b) => _urgenciaDe(a).index.compareTo(_urgenciaDe(b).index));
     return copia;
+  }
+
+  Future<void> _abrirDetalle(int noOrden) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrdenDetalleScreen(
+          noOrden: noOrden,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+    await _cargarOrdenes();
   }
 
   bool get esVistaTabla {
@@ -85,9 +97,12 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
           else if (ordenes.isEmpty)
             const OrdenesEmptyState()
           else if (esVistaTabla)
-            OrdenesTable(ordenes: ordenadasPorUrgencia)
+            OrdenesTable(ordenes: ordenadasPorUrgencia, onTap: _abrirDetalle)
           else
-            OrdenesCardGrid(ordenes: ordenadasPorUrgencia),
+            OrdenesCardGrid(
+              ordenes: ordenadasPorUrgencia,
+              onTap: _abrirDetalle,
+            ),
         ],
       ),
     );
@@ -127,9 +142,10 @@ class OrdenesEmptyState extends StatelessWidget {
 }
 
 class OrdenesTable extends StatelessWidget {
-  const OrdenesTable({super.key, required this.ordenes});
+  const OrdenesTable({super.key, required this.ordenes, required this.onTap});
 
   final List<OrdenServicio> ordenes;
+  final ValueChanged<int> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -149,7 +165,10 @@ class OrdenesTable extends StatelessWidget {
                   const OrdenesTableHeaderRow(),
                   for (var i = 0; i < ordenes.length; i++) ...[
                     if (i > 0) const Divider(height: 1, color: AppColors.border),
-                    OrdenesTableRow(orden: ordenes[i]),
+                    OrdenesTableRow(
+                      orden: ordenes[i],
+                      onTap: () => onTap(ordenes[i].noOrden),
+                    ),
                   ],
                 ],
               ),
@@ -196,60 +215,72 @@ class OrdenesTableHeaderRow extends StatelessWidget {
 }
 
 class OrdenesTableRow extends StatelessWidget {
-  const OrdenesTableRow({super.key, required this.orden});
+  const OrdenesTableRow({super.key, required this.orden, required this.onTap});
 
   final OrdenServicio orden;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final urgencia = calcularUrgencia(orden);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          UrgenciaDot(urgencia: urgencia),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: Text(
-              'OT-${orden.noOrden}',
-              style: Theme.of(context).textTheme.titleMedium,
+    final urgencia = _urgenciaDe(orden);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            UrgenciaDot(urgencia: urgencia),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: Text(
+                'OT-${orden.noOrden}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
             ),
-          ),
-          Expanded(
-            flex: 4,
-            child: Text(
-              '${orden.vehiculoMarca} ${orden.vehiculoModelo} - ${orden.vehiculoPlacas}',
+            Expanded(
+              flex: 4,
+              child: Text(
+                '${orden.vehiculoMarca} ${orden.vehiculoModelo} - ${orden.vehiculoPlacas}',
+              ),
             ),
-          ),
-          Expanded(flex: 3, child: Text(orden.clienteNombre)),
-          Expanded(flex: 2, child: Text(textoEntrega(orden))),
-          Expanded(
-            flex: 2,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: PriorityChip(label: orden.estado, color: colorDeEstado(orden.estado)),
+            Expanded(flex: 3, child: Text(orden.clienteNombre)),
+            Expanded(flex: 2, child: Text(_textoEntregaDe(orden))),
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: PriorityChip(
+                  label: orden.estado,
+                  color: colorDeEstado(orden.estado),
+                ),
+              ),
             ),
-          ),
-          SizedBox(
-            width: 100,
-            child: Text(
-              'L ${orden.total.toStringAsFixed(2)}',
-              textAlign: TextAlign.right,
-              style: Theme.of(context).textTheme.titleMedium,
+            SizedBox(
+              width: 100,
+              child: Text(
+                'L ${orden.total.toStringAsFixed(2)}',
+                textAlign: TextAlign.right,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 class OrdenesCardGrid extends StatelessWidget {
-  const OrdenesCardGrid({super.key, required this.ordenes});
+  const OrdenesCardGrid({
+    super.key,
+    required this.ordenes,
+    required this.onTap,
+  });
 
   final List<OrdenServicio> ordenes;
+  final ValueChanged<int> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +301,10 @@ class OrdenesCardGrid extends StatelessWidget {
             mainAxisSpacing: 12,
             mainAxisExtent: 220,
           ),
-          itemBuilder: (context, index) => OrdenCard(orden: ordenes[index]),
+          itemBuilder: (context, index) => OrdenCard(
+            orden: ordenes[index],
+            onTap: () => onTap(ordenes[index].noOrden),
+          ),
         );
       },
     );
@@ -278,68 +312,73 @@ class OrdenesCardGrid extends StatelessWidget {
 }
 
 class OrdenCard extends StatelessWidget {
-  const OrdenCard({super.key, required this.orden});
+  const OrdenCard({super.key, required this.orden, required this.onTap});
 
   final OrdenServicio orden;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final urgencia = calcularUrgencia(orden);
+    final urgencia = _urgenciaDe(orden);
     final terminada = orden.estado != 'En Proceso';
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'OT-${orden.noOrden}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const Spacer(),
-                PriorityChip(
-                  label: etiquetaUrgencia(urgencia),
-                  color: colorDeUrgencia(urgencia),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text('${orden.vehiculoMarca} ${orden.vehiculoModelo}'),
-            const SizedBox(height: 4),
-            Text(
-              orden.vehiculoPlacas,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Text(
-                orden.descripcionFalla,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Text(textoEntrega(orden)),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: LinearProgressIndicator(
-                    value: terminada ? 1.0 : null,
-                    minHeight: 7,
-                    borderRadius: BorderRadius.circular(8),
-                    color: terminada
-                        ? colorDeEstado(orden.estado)
-                        : colorDeUrgencia(urgencia),
-                    backgroundColor: AppColors.mist,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'OT-${orden.noOrden}',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
+                  const Spacer(),
+                  PriorityChip(
+                    label: etiquetaUrgencia(urgencia),
+                    color: colorDeUrgencia(urgencia),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text('${orden.vehiculoMarca} ${orden.vehiculoModelo}'),
+              const SizedBox(height: 4),
+              Text(
+                orden.vehiculoPlacas,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Text(
+                  orden.descripcionFalla,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(width: 10),
-                Text(orden.estado),
-              ],
-            ),
-          ],
+              ),
+              Text(_textoEntregaDe(orden)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: LinearProgressIndicator(
+                      value: terminada ? 1.0 : null,
+                      minHeight: 7,
+                      borderRadius: BorderRadius.circular(8),
+                      color: terminada
+                          ? colorDeEstado(orden.estado)
+                          : colorDeUrgencia(urgencia),
+                      backgroundColor: AppColors.mist,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(orden.estado),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -362,6 +401,17 @@ class UrgenciaDot extends StatelessWidget {
       ),
     );
   }
+}
+
+Urgencia _urgenciaDe(OrdenServicio orden) {
+  return calcularUrgencia(
+    estado: orden.estado,
+    fechaCompromiso: orden.fechaCompromiso,
+  );
+}
+
+String _textoEntregaDe(OrdenServicio orden) {
+  return textoEntrega(estado: orden.estado, fechaCompromiso: orden.fechaCompromiso);
 }
 
 Color colorDeEstado(String estado) {

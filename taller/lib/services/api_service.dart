@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../models/orden_detalle.dart';
 import '../models/orden_servicio.dart';
 import '../models/usuario.dart';
 
@@ -197,6 +198,20 @@ class ApiService {
           ON DELETE CASCADE
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS servicio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        no_orden INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        descripcion TEXT,
+        costo_mano_obra REAL DEFAULT 0,
+        costo_repuestos REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+          ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<List<Usuario>> listarUsuarios() async {
@@ -286,9 +301,21 @@ class ApiService {
     await db.delete('empleado', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<OrdenServicio>> listarOrdenes() async {
+  /// Si [idEmpleado] se especifica, solo devuelve las ordenes donde ese
+  /// empleado esta asignado (tabla trabaja). Sin filtro, devuelve todas
+  /// (uso de Administrador).
+  Future<List<OrdenServicio>> listarOrdenes({int? idEmpleado}) async {
     final db = await _db;
-    final rows = await db.rawQuery('''
+    final filtro = idEmpleado != null
+        ? '''
+      WHERE EXISTS (
+        SELECT 1 FROM trabaja t
+        WHERE t.no_orden = os.no_orden AND t.id_empleado = ?
+      )
+    '''
+        : '';
+    final rows = await db.rawQuery(
+      '''
       SELECT
         os.no_orden,
         os.descripcion_falla,
@@ -304,9 +331,114 @@ class ApiService {
       FROM orden_servicio os
       JOIN vehiculo v ON v.vin = os.vin
       JOIN cliente c ON c.id = v.id_cliente
+      $filtro
       ORDER BY os.no_orden DESC
-    ''');
+    ''',
+      idEmpleado != null ? [idEmpleado] : [],
+    );
     return rows.map(OrdenServicio.fromMap).toList();
+  }
+
+  Future<OrdenDetalle?> obtenerOrdenCompleta(int noOrden) async {
+    final db = await _db;
+    final ordenRows = await db.rawQuery(
+      '''
+      SELECT
+        os.no_orden,
+        os.descripcion_falla,
+        os.observaciones,
+        os.fecha_ingreso,
+        os.fecha_compromiso,
+        os.fecha_salida,
+        os.estado,
+        os.kilometraje_ingreso,
+        os.gasolina,
+        os.subtotal,
+        os.impuesto,
+        os.total,
+        v.vin,
+        v.marca,
+        v.modelo,
+        v.color,
+        v.anio,
+        v.placas,
+        c.id AS cliente_id,
+        c.nombre AS cliente_nombre,
+        c.direccion AS cliente_direccion
+      FROM orden_servicio os
+      JOIN vehiculo v ON v.vin = os.vin
+      JOIN cliente c ON c.id = v.id_cliente
+      WHERE os.no_orden = ?
+      LIMIT 1
+    ''',
+      [noOrden],
+    );
+
+    if (ordenRows.isEmpty) {
+      return null;
+    }
+
+    final ordenRow = ordenRows.first;
+    final clienteId = ordenRow['cliente_id'] as int;
+
+    final telefonos = await db.query(
+      'cliente_telefono',
+      where: 'id_cliente = ?',
+      whereArgs: [clienteId],
+    );
+    final correos = await db.query(
+      'cliente_correo',
+      where: 'id_cliente = ?',
+      whereArgs: [clienteId],
+    );
+    final servicios = await db.query(
+      'servicio',
+      where: 'no_orden = ?',
+      whereArgs: [noOrden],
+    );
+    final accesorios = await db.query(
+      'orden_accesorios',
+      where: 'no_orden = ?',
+      whereArgs: [noOrden],
+    );
+    final empleados = await db.rawQuery(
+      '''
+      SELECT e.id AS id_empleado, e.nombre, e.puesto, t.rol
+      FROM trabaja t
+      JOIN empleado e ON e.id = t.id_empleado
+      WHERE t.no_orden = ?
+    ''',
+      [noOrden],
+    );
+
+    return OrdenDetalle.build(
+      orden: ordenRow,
+      telefonos: telefonos,
+      correos: correos,
+      servicios: servicios,
+      accesorios: accesorios,
+      empleados: empleados,
+    );
+  }
+
+  Future<void> marcarEntregada(int noOrden, String fechaSalida) async {
+    final db = await _db;
+    await db.update(
+      'orden_servicio',
+      {'fecha_salida': fechaSalida, 'estado': 'Finalizado'},
+      where: 'no_orden = ?',
+      whereArgs: [noOrden],
+    );
+  }
+
+  Future<void> cancelarOrden(int noOrden) async {
+    final db = await _db;
+    await db.update(
+      'orden_servicio',
+      {'estado': 'Cancelado'},
+      where: 'no_orden = ?',
+      whereArgs: [noOrden],
+    );
   }
 
   Future<int> guardarOrdenServicio({

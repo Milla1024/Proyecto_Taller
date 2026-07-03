@@ -1,22 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../screens/home_screen.dart';
-import 'orden_servicio.dart';
 
 enum Urgencia { urgente, media, baja }
 
 /// Reglas: solo las ordenes "En Proceso" con fecha de compromiso entran al
 /// calculo; el resto se considera fuera de foco (baja).
-Urgencia calcularUrgencia(
-  OrdenServicio orden, {
+///
+/// Recibe los campos primitivos (no un modelo especifico) para que tanto la
+/// orden de la lista como el detalle completo puedan reusar la misma logica
+/// sin duplicarla.
+Urgencia calcularUrgencia({
+  required String estado,
+  required String? fechaCompromiso,
   DateTime? ahora,
   bool trabada = false,
 }) {
-  if (orden.estado != 'En Proceso') {
+  if (estado != 'En Proceso') {
     return Urgencia.baja;
   }
 
-  final compromiso = _parseFecha(orden.fechaCompromiso);
+  final compromiso = _parseFecha(fechaCompromiso);
   if (compromiso == null) {
     return Urgencia.baja;
   }
@@ -61,12 +65,16 @@ String etiquetaUrgencia(Urgencia urgencia) {
   }
 }
 
-String textoEntrega(OrdenServicio orden, {DateTime? ahora}) {
-  if (orden.estado != 'En Proceso') {
+String textoEntrega({
+  required String estado,
+  required String? fechaCompromiso,
+  DateTime? ahora,
+}) {
+  if (estado != 'En Proceso') {
     return 'Entregado';
   }
 
-  final compromiso = _parseFecha(orden.fechaCompromiso);
+  final compromiso = _parseFecha(fechaCompromiso);
   if (compromiso == null) {
     return 'Sin fecha';
   }
