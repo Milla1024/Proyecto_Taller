@@ -34,6 +34,8 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int selectedIndex = 0;
 
+  bool get _isAdmin => widget.currentUser?.rol == 'Administrador';
+
   static const destinations = [
     _Destination('Inicio', Icons.dashboard_outlined),
     _Destination('Ordenes', Icons.assignment_outlined),
@@ -47,6 +49,11 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final isWide = width >= 900;
+    final visibleDestinations = _isAdmin
+        ? destinations
+        : destinations
+              .where((destination) => destination.label != 'Usuarios')
+              .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -88,7 +95,7 @@ class _MainShellState extends State<MainShell> {
                 fontWeight: FontWeight.w700,
               ),
               destinations: [
-                for (final destination in destinations)
+                for (final destination in visibleDestinations)
                   NavigationRailDestination(
                     icon: Icon(destination.icon),
                     label: Text(destination.label),
@@ -102,6 +109,7 @@ class _MainShellState extends State<MainShell> {
                 DashboardView(
                   onCreateOrder: () => setState(() => selectedIndex = 2),
                   onOpenUsuarios: () => setState(() => selectedIndex = 5),
+                  showUsuarios: _isAdmin,
                 ),
                 OrdenesScreen(currentUser: widget.currentUser),
                 ServiceOrderScreen(currentUser: widget.currentUser),
@@ -131,7 +139,7 @@ class _MainShellState extends State<MainShell> {
                 setState(() => selectedIndex = value);
               },
               destinations: [
-                for (final destination in destinations)
+                for (final destination in visibleDestinations)
                   NavigationDestination(
                     icon: Icon(destination.icon),
                     label: destination.label,
@@ -147,10 +155,12 @@ class DashboardView extends StatelessWidget {
     super.key,
     required this.onCreateOrder,
     required this.onOpenUsuarios,
+    required this.showUsuarios,
   });
 
   final VoidCallback onCreateOrder;
   final VoidCallback onOpenUsuarios;
+  final bool showUsuarios;
 
   @override
   Widget build(BuildContext context) {
@@ -201,6 +211,7 @@ class DashboardView extends StatelessWidget {
           ModuleGrid(
             onOpenServiceOrder: onCreateOrder,
             onOpenUsuarios: onOpenUsuarios,
+            showUsuarios: showUsuarios,
           ),
         ],
       ),
@@ -609,10 +620,12 @@ class ModuleGrid extends StatelessWidget {
     super.key,
     required this.onOpenServiceOrder,
     required this.onOpenUsuarios,
+    required this.showUsuarios,
   });
 
   final VoidCallback onOpenServiceOrder;
   final VoidCallback onOpenUsuarios;
+  final bool showUsuarios;
 
   static const modules = [
     ModuleItem(
@@ -643,6 +656,10 @@ class ModuleGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final visibleModules = showUsuarios
+        ? modules
+        : modules.where((module) => module.title != 'Usuarios').toList();
+
     return SectionSurface(
       title: 'Modulos del sistema',
       actionLabel: 'Configurar',
@@ -657,7 +674,7 @@ class ModuleGrid extends StatelessWidget {
           return GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: modules.length,
+            itemCount: visibleModules.length,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
               crossAxisSpacing: 12,
@@ -665,9 +682,9 @@ class ModuleGrid extends StatelessWidget {
               mainAxisExtent: 176,
             ),
             itemBuilder: (context, index) => ModuleCard(
-              module: modules[index],
+              module: visibleModules[index],
               onTap: () {
-                switch (modules[index].title) {
+                switch (visibleModules[index].title) {
                   case 'Estado inicial':
                     onOpenServiceOrder();
                     break;
