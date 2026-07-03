@@ -87,7 +87,7 @@ class ApiService {
     final count = countRows.first['total'] as int;
     if (count == 0) {
       await db.insert('empleado', {
-        'nombre': 'Administrador',
+        'nombre': 'Prueba',
         'puesto': 'Administrador',
         'telefono': '',
         'contrase\u00f1a': 'admin123',
