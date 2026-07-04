@@ -13,12 +13,14 @@ class ServiceOrderScreen extends StatefulWidget {
   const ServiceOrderScreen({
     super.key,
     this.currentUser,
+    this.refreshToken = 0,
     this.onOrderSaved,
     this.ordenExistente,
     this.onOrderUpdated,
   });
 
   final Usuario? currentUser;
+  final int refreshToken;
   final VoidCallback? onOrderSaved;
   final OrdenDetalle? ordenExistente;
   final VoidCallback? onOrderUpdated;
@@ -101,15 +103,20 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   @override
   void didUpdateWidget(covariant ServiceOrderScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.ordenExistente?.noOrden == widget.ordenExistente?.noOrden) {
+    final sameOrder =
+        oldWidget.ordenExistente?.noOrden == widget.ordenExistente?.noOrden;
+    final sameRefresh = oldWidget.refreshToken == widget.refreshToken;
+    if (sameOrder && sameRefresh) {
       return;
     }
 
-    final orden = widget.ordenExistente;
-    if (orden != null) {
-      setState(() => _precargarDesde(orden));
-    } else {
-      clearForm();
+    if (!sameOrder) {
+      final orden = widget.ordenExistente;
+      if (orden != null) {
+        setState(() => _precargarDesde(orden));
+      } else {
+        clearForm();
+      }
     }
     loadEmployees();
   }
@@ -400,17 +407,20 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
       currentEmployeeId =
           widget.currentUser?.id ??
           (activeEmployees.isEmpty ? null : activeEmployees.first.id);
-      assignedEmployees.clear();
       final orden = widget.ordenExistente;
       if (orden != null) {
+        assignedEmployees.clear();
         for (final empleado in orden.empleados) {
           if (activeEmployees.any((e) => e.id == empleado.id)) {
             assignedEmployees[empleado.id] = empleado.rolOrden ?? 'Mecanico';
           }
         }
       } else {
+        assignedEmployees.removeWhere(
+          (id, _) => !activeEmployees.any((employee) => employee.id == id),
+        );
         final currentId = currentEmployeeId;
-        if (currentId != null) {
+        if (currentId != null && assignedEmployees.isEmpty) {
           assignedEmployees[currentId] = 'Responsable';
         }
       }

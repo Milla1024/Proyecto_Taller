@@ -1,6 +1,7 @@
 PRAGMA foreign_keys = ON;
 
 DROP TABLE IF EXISTS trabaja;
+DROP TABLE IF EXISTS notificacion_usuario;
 DROP TABLE IF EXISTS servicio;
 DROP TABLE IF EXISTS orden_accesorios;
 DROP TABLE IF EXISTS cliente_telefono;
@@ -102,3 +103,22 @@ CREATE TABLE servicio (
     FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
         ON DELETE CASCADE
 );
+
+CREATE TABLE notificacion_usuario (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_empleado INTEGER NOT NULL,
+    no_orden INTEGER NOT NULL,
+    titulo TEXT NOT NULL,
+    mensaje TEXT NOT NULL,
+    estado_anterior TEXT,
+    estado_nuevo TEXT NOT NULL,
+    leida INTEGER DEFAULT 0,
+    fecha_creacion TEXT NOT NULL,
+    FOREIGN KEY (id_empleado) REFERENCES empleado(id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX idx_notificacion_usuario_empleado_leida
+ON notificacion_usuario(id_empleado, leida, fecha_creacion);
