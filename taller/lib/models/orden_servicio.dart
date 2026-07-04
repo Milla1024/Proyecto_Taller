@@ -32,7 +32,7 @@ class OrdenServicio {
       fechaIngreso: map['fecha_ingreso'] as String? ?? '',
       fechaCompromiso: map['fecha_compromiso'] as String?,
       fechaSalida: map['fecha_salida'] as String?,
-      estado: map['estado'] as String? ?? 'En Proceso',
+      estado: map['estado'] as String? ?? 'En revisión',
       total: (map['total'] as num?)?.toDouble() ?? 0,
       vehiculoMarca: map['marca'] as String? ?? '',
       vehiculoModelo: map['modelo'] as String? ?? '',

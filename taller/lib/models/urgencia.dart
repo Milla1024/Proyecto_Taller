@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../screens/home_screen.dart';
+import 'estado_orden.dart';
 
 enum Urgencia { urgente, media, baja }
 
-/// Reglas: solo las ordenes "En Proceso" con fecha de compromiso entran al
-/// calculo; el resto se considera fuera de foco (baja).
+/// Reglas: solo las ordenes en un estado no terminal (En revision o En
+/// progreso) con fecha de compromiso entran al calculo; el resto se
+/// considera fuera de foco (baja).
 ///
 /// Recibe los campos primitivos (no un modelo especifico) para que tanto la
 /// orden de la lista como el detalle completo puedan reusar la misma logica
@@ -16,7 +18,7 @@ Urgencia calcularUrgencia({
   DateTime? ahora,
   bool trabada = false,
 }) {
-  if (estado != 'En Proceso') {
+  if (esEstadoTerminal(EstadoOrden.fromDb(estado))) {
     return Urgencia.baja;
   }
 
@@ -70,7 +72,7 @@ String textoEntrega({
   required String? fechaCompromiso,
   DateTime? ahora,
 }) {
-  if (estado != 'En Proceso') {
+  if (esEstadoTerminal(EstadoOrden.fromDb(estado))) {
     return 'Entregado';
   }
 

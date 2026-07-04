@@ -7,6 +7,11 @@ import '../models/orden_detalle.dart';
 import '../models/orden_servicio.dart';
 import '../models/usuario.dart';
 
+/// Activar SOLO cuando el modulo de facturas persista la transaccion antes
+/// de perder acceso a la orden de origen. Mientras este en false,
+/// purgarOrdenesCompletadas() queda cableada pero es un no-op.
+const bool kPurgaOrdenesActiva = false;
+
 class ApiService {
   ApiService._();
 
@@ -53,6 +58,7 @@ class ApiService {
     await db.execute('PRAGMA foreign_keys = ON');
     await _prepareEmpleadoTable(db);
     await _prepareServiceOrderTables(db);
+    await _purgarOrdenesCompletadas(db);
   }
 
   Future<void> _prepareEmpleadoTable(Database db) async {
@@ -225,36 +231,7 @@ class ApiService {
       )
     ''');
 
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS orden_servicio (
-        no_orden INTEGER PRIMARY KEY AUTOINCREMENT,
-        descripcion_falla TEXT NOT NULL,
-        fecha_ingreso TEXT NOT NULL,
-        fecha_salida TEXT,
-        estado TEXT NOT NULL CHECK(estado IN ('En Proceso', 'Finalizado', 'Cancelado')) DEFAULT 'En Proceso',
-        kilometraje_ingreso INTEGER,
-        gasolina TEXT,
-        observaciones TEXT,
-        subtotal REAL DEFAULT 0,
-        impuesto REAL DEFAULT 0,
-        total REAL DEFAULT 0,
-        vin TEXT NOT NULL,
-        FOREIGN KEY (vin) REFERENCES vehiculo(vin)
-          ON DELETE CASCADE
-      )
-    ''');
-
-    final ordenColumns = await db.rawQuery('PRAGMA table_info(orden_servicio)');
-    final ordenColumnNames = ordenColumns
-        .map((column) => column['name'] as String)
-        .toSet();
-    Future<void> addOrdenColumn(String name, String definition) async {
-      if (!ordenColumnNames.contains(name)) {
-        await db.execute('ALTER TABLE orden_servicio ADD COLUMN $definition');
-      }
-    }
-
-    await addOrdenColumn('fecha_compromiso', 'fecha_compromiso TEXT');
+    await _prepareOrdenServicioTable(db);
 
     await db.execute('''
       CREATE TABLE IF NOT EXISTS orden_accesorios (
@@ -293,6 +270,111 @@ class ApiService {
           ON DELETE CASCADE
       )
     ''');
+  }
+
+  Future<void> _prepareOrdenServicioTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS orden_servicio (
+        no_orden INTEGER PRIMARY KEY AUTOINCREMENT,
+        descripcion_falla TEXT NOT NULL,
+        fecha_ingreso TEXT NOT NULL,
+        fecha_compromiso TEXT,
+        fecha_salida TEXT,
+        estado TEXT NOT NULL CHECK(estado IN ('En revisión', 'En progreso', 'Completado', 'Cancelado')) DEFAULT 'En revisión',
+        kilometraje_ingreso INTEGER,
+        gasolina TEXT,
+        observaciones TEXT,
+        subtotal REAL DEFAULT 0,
+        impuesto REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        vin TEXT NOT NULL,
+        FOREIGN KEY (vin) REFERENCES vehiculo(vin)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    final ordenColumns = await db.rawQuery('PRAGMA table_info(orden_servicio)');
+    final ordenColumnNames = ordenColumns
+        .map((column) => column['name'] as String)
+        .toSet();
+    Future<void> addOrdenColumn(String name, String definition) async {
+      if (!ordenColumnNames.contains(name)) {
+        await db.execute('ALTER TABLE orden_servicio ADD COLUMN $definition');
+      }
+    }
+
+    await addOrdenColumn('fecha_compromiso', 'fecha_compromiso TEXT');
+
+    await _rebuildOrdenServicioEstadoIfNeeded(db);
+  }
+
+  /// SQLite no permite ALTER de un CHECK existente: si la tabla todavia tiene
+  /// el CHECK viejo ('En Proceso', 'Finalizado', 'Cancelado'), la reconstruye
+  /// con el CHECK nuevo, mapeando los valores de estado y preservando el
+  /// resto de columnas.
+  Future<void> _rebuildOrdenServicioEstadoIfNeeded(Database db) async {
+    final schemaRows = await db.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orden_servicio'",
+    );
+    final schemaSql = schemaRows.isEmpty
+        ? ''
+        : (schemaRows.first['sql'] as String? ?? '');
+    final tieneCheckViejo = schemaSql.contains('En Proceso');
+    if (!tieneCheckViejo) {
+      return;
+    }
+
+    await db.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await db.transaction((txn) async {
+        await txn.execute('''
+          CREATE TABLE orden_servicio_new (
+            no_orden INTEGER PRIMARY KEY AUTOINCREMENT,
+            descripcion_falla TEXT NOT NULL,
+            fecha_ingreso TEXT NOT NULL,
+            fecha_compromiso TEXT,
+            fecha_salida TEXT,
+            estado TEXT NOT NULL CHECK(estado IN ('En revisión', 'En progreso', 'Completado', 'Cancelado')) DEFAULT 'En revisión',
+            kilometraje_ingreso INTEGER,
+            gasolina TEXT,
+            observaciones TEXT,
+            subtotal REAL DEFAULT 0,
+            impuesto REAL DEFAULT 0,
+            total REAL DEFAULT 0,
+            vin TEXT NOT NULL,
+            FOREIGN KEY (vin) REFERENCES vehiculo(vin)
+              ON DELETE CASCADE
+          )
+        ''');
+
+        await txn.execute('''
+          INSERT INTO orden_servicio_new (
+            no_orden, descripcion_falla, fecha_ingreso, fecha_compromiso,
+            fecha_salida, estado, kilometraje_ingreso, gasolina,
+            observaciones, subtotal, impuesto, total, vin
+          )
+          SELECT
+            no_orden, descripcion_falla, fecha_ingreso, fecha_compromiso,
+            fecha_salida,
+            CASE estado
+              WHEN 'En Proceso' THEN 'En progreso'
+              WHEN 'Finalizado' THEN 'Completado'
+              WHEN 'Cancelado' THEN 'Cancelado'
+              ELSE 'En revisión'
+            END,
+            kilometraje_ingreso, gasolina, observaciones, subtotal, impuesto,
+            total, vin
+          FROM orden_servicio
+        ''');
+
+        await txn.execute('DROP TABLE orden_servicio');
+        await txn.execute(
+          'ALTER TABLE orden_servicio_new RENAME TO orden_servicio',
+        );
+      });
+    } finally {
+      await db.execute('PRAGMA foreign_keys = ON');
+    }
   }
 
   Future<List<Usuario>> listarUsuarios() async {
@@ -492,13 +574,13 @@ class ApiService {
     );
   }
 
-  Future<void> marcarEntregada(int noOrden, String fechaSalida) async {
+  Future<void> aceptarOrden(int noOrden) async {
     final db = await _db;
     await db.update(
       'orden_servicio',
-      {'fecha_salida': fechaSalida, 'estado': 'Finalizado'},
-      where: 'no_orden = ?',
-      whereArgs: [noOrden],
+      {'estado': 'En progreso'},
+      where: 'no_orden = ? AND estado = ?',
+      whereArgs: [noOrden, 'En revisión'],
     );
   }
 
@@ -507,9 +589,38 @@ class ApiService {
     await db.update(
       'orden_servicio',
       {'estado': 'Cancelado'},
-      where: 'no_orden = ?',
-      whereArgs: [noOrden],
+      where: 'no_orden = ? AND estado = ?',
+      whereArgs: [noOrden, 'En revisión'],
     );
+  }
+
+  /// [fechaSalidaIso] debe ir en formato yyyy-MM-dd: esta fecha tambien
+  /// arranca el reloj de retencion para purgarOrdenesCompletadas().
+  Future<void> completarOrden(int noOrden, String fechaSalidaIso) async {
+    final db = await _db;
+    await db.update(
+      'orden_servicio',
+      {'estado': 'Completado', 'fecha_salida': fechaSalidaIso},
+      where: 'no_orden = ? AND estado = ?',
+      whereArgs: [noOrden, 'En progreso'],
+    );
+  }
+
+  Future<void> _purgarOrdenesCompletadas(Database db) async {
+    if (!kPurgaOrdenesActiva) {
+      return;
+    }
+    await db.rawDelete('''
+      DELETE FROM orden_servicio
+      WHERE estado = 'Completado'
+        AND fecha_salida IS NOT NULL
+        AND date(fecha_salida) <= date('now', '-2 months')
+    ''');
+  }
+
+  Future<void> purgarOrdenesCompletadas() async {
+    final db = await _db;
+    await _purgarOrdenesCompletadas(db);
   }
 
   Future<int> guardarOrdenServicio({
@@ -585,7 +696,7 @@ class ApiService {
             ? null
             : fechaCompromiso.trim(),
         'fecha_salida': fechaSalida.trim().isEmpty ? null : fechaSalida.trim(),
-        'estado': 'En Proceso',
+        'estado': 'En revisión',
         'kilometraje_ingreso': kilometrajeIngreso,
         'gasolina': gasolina,
         'observaciones': '',
@@ -609,6 +720,150 @@ class ApiService {
       }
 
       return orderId;
+    });
+  }
+
+  /// Actualiza una orden existente (modo edicion): SOLO toca los campos de
+  /// ingreso. Nunca cambia no_orden, vin, estado, fecha_salida ni total,
+  /// esos los maneja la maquina de estados / las transiciones.
+  ///
+  /// No requiere apagar foreign_keys: no se dropea ninguna tabla, solo se
+  /// reemplazan filas hijas (cliente_telefono/correo, orden_accesorios,
+  /// trabaja) cuyos padres (cliente, orden_servicio) nunca se borran.
+  Future<void> actualizarOrdenServicio({
+    required int noOrden,
+    required String clienteNombre,
+    required String clienteDireccion,
+    required String clienteTelefono,
+    required String clienteCorreo,
+    required String vehiculoMarca,
+    required String vehiculoModelo,
+    required String vehiculoColor,
+    required int? vehiculoAnio,
+    required String vehiculoPlacas,
+    required String descripcionFalla,
+    required String fechaIngreso,
+    required String fechaCompromiso,
+    required int? kilometrajeIngreso,
+    required String gasolina,
+    required String observaciones,
+    required Map<String, bool> accesorios,
+    required Map<int, String> empleadosAsignados,
+  }) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      final ordenRows = await txn.query(
+        'orden_servicio',
+        columns: ['vin'],
+        where: 'no_orden = ?',
+        whereArgs: [noOrden],
+        limit: 1,
+      );
+      if (ordenRows.isEmpty) {
+        throw StateError('No se encontro la orden $noOrden');
+      }
+      final vin = ordenRows.first['vin'] as String;
+
+      final vehiculoRows = await txn.query(
+        'vehiculo',
+        columns: ['id_cliente'],
+        where: 'vin = ?',
+        whereArgs: [vin],
+        limit: 1,
+      );
+      if (vehiculoRows.isEmpty) {
+        throw StateError('No se encontro el vehiculo $vin');
+      }
+      final clienteId = vehiculoRows.first['id_cliente'] as int;
+
+      await txn.update(
+        'cliente',
+        {'nombre': clienteNombre.trim(), 'direccion': clienteDireccion.trim()},
+        where: 'id = ?',
+        whereArgs: [clienteId],
+      );
+
+      await txn.delete(
+        'cliente_telefono',
+        where: 'id_cliente = ?',
+        whereArgs: [clienteId],
+      );
+      final telefono = clienteTelefono.trim();
+      if (telefono.isNotEmpty) {
+        await txn.insert('cliente_telefono', {
+          'id_cliente': clienteId,
+          'telefono': telefono,
+        });
+      }
+
+      await txn.delete(
+        'cliente_correo',
+        where: 'id_cliente = ?',
+        whereArgs: [clienteId],
+      );
+      final correo = clienteCorreo.trim();
+      if (correo.isNotEmpty) {
+        await txn.insert('cliente_correo', {
+          'id_cliente': clienteId,
+          'correo': correo,
+        });
+      }
+
+      await txn.update(
+        'vehiculo',
+        {
+          'marca': vehiculoMarca.trim(),
+          'modelo': vehiculoModelo.trim(),
+          'color': vehiculoColor.trim(),
+          'anio': vehiculoAnio,
+          'placas': vehiculoPlacas.trim(),
+          'kilometraje': kilometrajeIngreso ?? 0,
+        },
+        where: 'vin = ?',
+        whereArgs: [vin],
+      );
+
+      await txn.update(
+        'orden_servicio',
+        {
+          'descripcion_falla': descripcionFalla.trim(),
+          'fecha_ingreso': fechaIngreso.trim(),
+          'fecha_compromiso': fechaCompromiso.trim().isEmpty
+              ? null
+              : fechaCompromiso.trim(),
+          'kilometraje_ingreso': kilometrajeIngreso,
+          'gasolina': gasolina,
+          'observaciones': observaciones,
+        },
+        where: 'no_orden = ?',
+        whereArgs: [noOrden],
+      );
+
+      await txn.delete(
+        'orden_accesorios',
+        where: 'no_orden = ?',
+        whereArgs: [noOrden],
+      );
+      for (final entry in accesorios.entries) {
+        await txn.insert('orden_accesorios', {
+          'no_orden': noOrden,
+          'accesorio': entry.key,
+          'presente': entry.value ? 1 : 0,
+        });
+      }
+
+      await txn.delete(
+        'trabaja',
+        where: 'no_orden = ?',
+        whereArgs: [noOrden],
+      );
+      for (final entry in empleadosAsignados.entries) {
+        await txn.insert('trabaja', {
+          'id_empleado': entry.key,
+          'no_orden': noOrden,
+          'rol': entry.value,
+        });
+      }
     });
   }
 

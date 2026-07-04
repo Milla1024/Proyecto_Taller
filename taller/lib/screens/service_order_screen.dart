@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/estado_orden.dart';
+import '../models/orden_detalle.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
 import '../services/print_service.dart';
@@ -8,10 +10,18 @@ import '../widgets/custom_button.dart';
 import 'home_screen.dart';
 
 class ServiceOrderScreen extends StatefulWidget {
-  const ServiceOrderScreen({super.key, this.currentUser, this.onOrderSaved});
+  const ServiceOrderScreen({
+    super.key,
+    this.currentUser,
+    this.onOrderSaved,
+    this.ordenExistente,
+    this.onOrderUpdated,
+  });
 
   final Usuario? currentUser;
   final VoidCallback? onOrderSaved;
+  final OrdenDetalle? ordenExistente;
+  final VoidCallback? onOrderUpdated;
 
   @override
   State<ServiceOrderScreen> createState() => _ServiceOrderScreenState();
@@ -73,12 +83,65 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
   bool employeesLoading = true;
   bool orderSaved = false;
 
+  bool get isEditing => widget.ordenExistente != null;
+
   @override
   void initState() {
     super.initState();
-    entryDateController.text = currentDateText();
+    final orden = widget.ordenExistente;
+    if (orden != null) {
+      _precargarDesde(orden);
+    } else {
+      entryDateController.text = currentDateText();
+      loadNextOrderNumber();
+    }
     loadEmployees();
-    loadNextOrderNumber();
+  }
+
+  @override
+  void didUpdateWidget(covariant ServiceOrderScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.ordenExistente?.noOrden == widget.ordenExistente?.noOrden) {
+      return;
+    }
+
+    final orden = widget.ordenExistente;
+    if (orden != null) {
+      setState(() => _precargarDesde(orden));
+    } else {
+      clearForm();
+    }
+    loadEmployees();
+  }
+
+  void _precargarDesde(OrdenDetalle orden) {
+    previewOrderId = orden.noOrden;
+    orderController.text = formatOrderNumber(orden.noOrden);
+    nameController.text = orden.clienteNombre;
+    addressController.text = orden.clienteDireccion ?? '';
+    phoneController.text = orden.clienteTelefonos.isNotEmpty
+        ? orden.clienteTelefonos.first
+        : '';
+    emailController.text = orden.clienteCorreos.isNotEmpty
+        ? orden.clienteCorreos.first
+        : '';
+    entryDateController.text = orden.fechaIngreso;
+    deliveryDateController.text = orden.fechaCompromiso ?? '';
+    brandController.text = orden.vehiculoMarca;
+    modelController.text = orden.vehiculoModelo;
+    yearController.text = orden.vehiculoAnio?.toString() ?? '';
+    colorController.text = orden.vehiculoColor ?? '';
+    plateController.text = orden.vehiculoPlacas;
+    vinController.text = orden.vehiculoVin;
+    mileageController.text = orden.kilometrajeIngreso?.toString() ?? '';
+    faultController.text = orden.descripcionFalla;
+    fuelLevel = _parseFuelLevel(orden.gasolina);
+    acceptsTerms = true;
+    for (final accesorio in orden.accesorios) {
+      if (inventory.containsKey(accesorio.nombre)) {
+        inventory[accesorio.nombre] = accesorio.presente;
+      }
+    }
   }
 
   @override
@@ -193,6 +256,67 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
     }
   }
 
+  Future<void> updateOrder() async {
+    final orden = widget.ordenExistente;
+    if (orden == null) {
+      return;
+    }
+
+    final valid = formKey.currentState?.validate() ?? false;
+    if (!valid) {
+      return;
+    }
+
+    if (assignedEmployees.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Asigna al menos un empleado.')),
+      );
+      return;
+    }
+
+    try {
+      await ApiService.instance.actualizarOrdenServicio(
+        noOrden: orden.noOrden,
+        clienteNombre: nameController.text,
+        clienteDireccion: addressController.text,
+        clienteTelefono: phoneController.text,
+        clienteCorreo: emailController.text,
+        vehiculoMarca: brandController.text,
+        vehiculoModelo: modelController.text,
+        vehiculoColor: colorController.text,
+        vehiculoAnio: int.tryParse(yearController.text.trim()),
+        vehiculoPlacas: plateController.text,
+        descripcionFalla: faultController.text,
+        fechaIngreso: entryDateController.text,
+        fechaCompromiso: deliveryDateController.text,
+        kilometrajeIngreso: int.tryParse(mileageController.text.trim()),
+        gasolina: '${(fuelLevel * 100).round()}%',
+        observaciones: orden.observaciones ?? '',
+        accesorios: inventory,
+        empleadosAsignados: assignedEmployees,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Orden ${formatOrderNumber(orden.noOrden)} actualizada.',
+          ),
+        ),
+      );
+      widget.onOrderUpdated?.call();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo actualizar la orden: $error')),
+      );
+    }
+  }
+
   void clearForm() {
     formKey.currentState?.reset();
     setState(() {
@@ -253,6 +377,15 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
     return '$day/$month/${now.year}';
   }
 
+  double _parseFuelLevel(String? gasolina) {
+    final digits = RegExp(r'\d+').firstMatch(gasolina ?? '')?.group(0);
+    final value = int.tryParse(digits ?? '');
+    if (value == null) {
+      return 0.45;
+    }
+    return value.clamp(0, 100) / 100;
+  }
+
   Future<void> loadEmployees() async {
     final loaded = await ApiService.instance.listarUsuarios();
     if (!mounted) {
@@ -268,9 +401,18 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
           widget.currentUser?.id ??
           (activeEmployees.isEmpty ? null : activeEmployees.first.id);
       assignedEmployees.clear();
-      final currentId = currentEmployeeId;
-      if (currentId != null) {
-        assignedEmployees[currentId] = 'Responsable';
+      final orden = widget.ordenExistente;
+      if (orden != null) {
+        for (final empleado in orden.empleados) {
+          if (activeEmployees.any((e) => e.id == empleado.id)) {
+            assignedEmployees[empleado.id] = empleado.rolOrden ?? 'Mecanico';
+          }
+        }
+      } else {
+        final currentId = currentEmployeeId;
+        if (currentId != null) {
+          assignedEmployees[currentId] = 'Responsable';
+        }
       }
       selectedEmployeeId = firstAvailableEmployeeId();
       employeesLoading = false;
@@ -376,6 +518,13 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const ServiceOrderHeader(),
+            if (isEditing) ...[
+              const SizedBox(height: 12),
+              EditingBanner(
+                noOrden: widget.ordenExistente!.noOrden,
+                estado: widget.ordenExistente!.estado,
+              ),
+            ],
             const SizedBox(height: 20),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -454,6 +603,7 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
               colorController: colorController,
               plateController: plateController,
               vinController: vinController,
+              vinReadOnly: isEditing,
             ),
             const SizedBox(height: 16),
             FormSection(
@@ -509,15 +659,16 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
               runSpacing: 10,
               children: [
                 CustomButton(
-                  label: 'Guardar orden',
+                  label: isEditing ? 'Guardar cambios' : 'Guardar orden',
                   icon: Icons.save_outlined,
-                  onPressed: saveOrder,
+                  onPressed: isEditing ? updateOrder : saveOrder,
                 ),
-                OutlinedButton.icon(
-                  onPressed: clearForm,
-                  icon: const Icon(Icons.refresh_outlined),
-                  label: const Text('Limpiar'),
-                ),
+                if (!isEditing)
+                  OutlinedButton.icon(
+                    onPressed: clearForm,
+                    icon: const Icon(Icons.refresh_outlined),
+                    label: const Text('Limpiar'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: printOrder,
                   icon: const Icon(Icons.print_outlined),
@@ -526,6 +677,33 @@ class _ServiceOrderScreenState extends State<ServiceOrderScreen> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class EditingBanner extends StatelessWidget {
+  const EditingBanner({super.key, required this.noOrden, required this.estado});
+
+  final int noOrden;
+  final String estado;
+
+  @override
+  Widget build(BuildContext context) {
+    final etiquetaEstado = EstadoOrden.fromDb(estado).label;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.softGray,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        'Editando OT-$noOrden · $etiquetaEstado',
+        style: const TextStyle(
+          color: AppColors.steel,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -1025,6 +1203,7 @@ class VehicleSection extends StatelessWidget {
     required this.colorController,
     required this.plateController,
     required this.vinController,
+    this.vinReadOnly = false,
   });
 
   final TextEditingController brandController;
@@ -1033,6 +1212,7 @@ class VehicleSection extends StatelessWidget {
   final TextEditingController colorController;
   final TextEditingController plateController;
   final TextEditingController vinController;
+  final bool vinReadOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -1091,6 +1271,7 @@ class VehicleSection extends StatelessWidget {
                 FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9]')),
               ],
               validator: vinValidator,
+              readOnly: vinReadOnly,
             ),
           ];
 

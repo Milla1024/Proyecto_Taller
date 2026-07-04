@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/estado_orden.dart';
+import '../models/orden_detalle.dart';
 import '../models/orden_servicio.dart';
 import '../models/urgencia.dart';
 import '../models/usuario.dart';
@@ -8,10 +10,16 @@ import 'home_screen.dart';
 import 'orden_detalle_screen.dart';
 
 class OrdenesScreen extends StatefulWidget {
-  const OrdenesScreen({super.key, this.currentUser, this.refreshToken = 0});
+  const OrdenesScreen({
+    super.key,
+    this.currentUser,
+    this.refreshToken = 0,
+    this.onEditarOrden,
+  });
 
   final Usuario? currentUser;
   final int refreshToken;
+  final ValueChanged<OrdenDetalle>? onEditarOrden;
 
   @override
   State<OrdenesScreen> createState() => _OrdenesScreenState();
@@ -75,6 +83,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
         builder: (_) => OrdenDetalleScreen(
           noOrden: noOrden,
           currentUser: widget.currentUser,
+          onEditarOrden: widget.onEditarOrden,
         ),
       ),
     );
@@ -266,10 +275,7 @@ class OrdenesTableRow extends StatelessWidget {
               flex: 2,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: PriorityChip(
-                  label: orden.estado,
-                  color: colorDeEstado(orden.estado),
-                ),
+                child: EstadoChip(estado: EstadoOrden.fromDb(orden.estado)),
               ),
             ),
             SizedBox(
@@ -335,7 +341,8 @@ class OrdenCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final urgencia = _urgenciaDe(orden);
-    final terminada = orden.estado != 'En Proceso';
+    final estadoOrden = EstadoOrden.fromDb(orden.estado);
+    final terminada = esEstadoTerminal(estadoOrden);
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -383,13 +390,13 @@ class OrdenCard extends StatelessWidget {
                       minHeight: 7,
                       borderRadius: BorderRadius.circular(8),
                       color: terminada
-                          ? colorDeEstado(orden.estado)
+                          ? colorDeTextoEstado(estadoOrden)
                           : colorDeUrgencia(urgencia),
                       backgroundColor: AppColors.mist,
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Text(orden.estado),
+                  EstadoChip(estado: estadoOrden),
                 ],
               ),
             ],
@@ -418,6 +425,30 @@ class UrgenciaDot extends StatelessWidget {
   }
 }
 
+class EstadoChip extends StatelessWidget {
+  const EstadoChip({super.key, required this.estado});
+
+  final EstadoOrden estado;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorDeFondoEstado(estado),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        estado.label,
+        style: TextStyle(
+          color: colorDeTextoEstado(estado),
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
 Urgencia _urgenciaDe(OrdenServicio orden) {
   return calcularUrgencia(
     estado: orden.estado,
@@ -430,15 +461,4 @@ String _textoEntregaDe(OrdenServicio orden) {
     estado: orden.estado,
     fechaCompromiso: orden.fechaCompromiso,
   );
-}
-
-Color colorDeEstado(String estado) {
-  switch (estado) {
-    case 'Finalizado':
-      return AppColors.teal;
-    case 'Cancelado':
-      return AppColors.coral;
-    default:
-      return AppColors.steel;
-  }
 }

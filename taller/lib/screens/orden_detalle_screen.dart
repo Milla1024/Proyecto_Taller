@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/estado_orden.dart';
 import '../models/orden_detalle.dart';
 import '../models/urgencia.dart';
 import '../models/usuario.dart';
@@ -15,10 +16,12 @@ class OrdenDetalleScreen extends StatefulWidget {
     super.key,
     required this.noOrden,
     this.currentUser,
+    this.onEditarOrden,
   });
 
   final int noOrden;
   final Usuario? currentUser;
+  final ValueChanged<OrdenDetalle>? onEditarOrden;
 
   @override
   State<OrdenDetalleScreen> createState() => _OrdenDetalleScreenState();
@@ -33,17 +36,34 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
     _future = ApiService.instance.obtenerOrdenCompleta(widget.noOrden);
   }
 
-  bool get _puedeCerrarOrden {
-    final currentUser = widget.currentUser;
-    return currentUser != null && currentUser.rol == 'Administrador';
-  }
-
   bool get _puedeVerTotales {
     final rol = widget.currentUser?.rol;
     return rol == null || rol == 'Administrador';
   }
 
-  Future<void> _marcarEntregada() async {
+  String get _rol => widget.currentUser?.rol ?? '';
+
+  void _recargar() {
+    setState(() {
+      _future = ApiService.instance.obtenerOrdenCompleta(widget.noOrden);
+    });
+  }
+
+  void _editarOrden(OrdenDetalle detalle) {
+    widget.onEditarOrden?.call(detalle);
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _imprimirYAceptar(OrdenDetalle detalle) async {
+    await _imprimir(detalle);
+    await ApiService.instance.aceptarOrden(widget.noOrden);
+    if (!mounted) {
+      return;
+    }
+    _recargar();
+  }
+
+  Future<void> _completarOrden() async {
     var fechaSeleccionada = DateTime.now();
     final confirmado = await showDialog<DateTime>(
       context: context,
@@ -51,7 +71,7 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             return AlertDialog(
-              title: const Text('Marcar como entregada'),
+              title: const Text('Marcar como completada'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,14 +128,14 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
       return;
     }
 
-    await ApiService.instance.marcarEntregada(
+    await ApiService.instance.completarOrden(
       widget.noOrden,
-      _formatearFecha(confirmado),
+      _formatearFechaIso(confirmado),
     );
     if (!mounted) {
       return;
     }
-    Navigator.of(context).pop();
+    _recargar();
   }
 
   Future<void> _cancelarOrden() async {
@@ -149,7 +169,7 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
     if (!mounted) {
       return;
     }
-    Navigator.of(context).pop();
+    _recargar();
   }
 
   Future<void> _imprimir(OrdenDetalle detalle) async {
@@ -240,15 +260,16 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
                   const SizedBox(height: 16),
                   TotalesDetalleSection(detalle: detalle),
                 ],
-                if (_puedeCerrarOrden) ...[
-                  const SizedBox(height: 20),
-                  AccionesCierreBar(
-                    habilitado: detalle.estado == 'En Proceso',
-                    onMarcarEntregada: _marcarEntregada,
-                    onCancelarOrden: _cancelarOrden,
-                    onImprimir: () => _imprimir(detalle),
-                  ),
-                ],
+                const SizedBox(height: 20),
+                AccionesEstadoBar(
+                  estado: EstadoOrden.fromDb(detalle.estado),
+                  rol: _rol,
+                  onImprimir: () => _imprimir(detalle),
+                  onImprimirYAceptar: () => _imprimirYAceptar(detalle),
+                  onCancelar: _cancelarOrden,
+                  onCompletar: _completarOrden,
+                  onEditar: () => _editarOrden(detalle),
+                ),
               ],
             ),
           );
@@ -282,10 +303,7 @@ class OrdenDetalleHeader extends StatelessWidget {
               'OT-${detalle.noOrden}',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
-            PriorityChip(
-              label: detalle.estado,
-              color: colorDeEstado(detalle.estado),
-            ),
+            EstadoChip(estado: EstadoOrden.fromDb(detalle.estado)),
             PriorityChip(
               label: etiquetaUrgencia(urgencia),
               color: colorDeUrgencia(urgencia),
@@ -589,46 +607,85 @@ class _TotalRow extends StatelessWidget {
   }
 }
 
-class AccionesCierreBar extends StatelessWidget {
-  const AccionesCierreBar({
+class AccionesEstadoBar extends StatelessWidget {
+  const AccionesEstadoBar({
     super.key,
-    required this.habilitado,
-    required this.onMarcarEntregada,
-    required this.onCancelarOrden,
+    required this.estado,
+    required this.rol,
     required this.onImprimir,
+    required this.onImprimirYAceptar,
+    required this.onCancelar,
+    required this.onCompletar,
+    required this.onEditar,
   });
 
-  final bool habilitado;
-  final VoidCallback onMarcarEntregada;
-  final VoidCallback onCancelarOrden;
+  final EstadoOrden estado;
+  final String rol;
   final VoidCallback onImprimir;
+  final VoidCallback onImprimirYAceptar;
+  final VoidCallback onCancelar;
+  final VoidCallback onCompletar;
+  final VoidCallback onEditar;
 
   @override
   Widget build(BuildContext context) {
+    final botones = <Widget>[
+      if (puedeAceptar(estado, rol))
+        FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
+          onPressed: onImprimirYAceptar,
+          icon: const Icon(Icons.print_outlined),
+          label: const Text('Imprimir y aceptar'),
+        ),
+      if (puedeCompletar(estado, rol))
+        FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
+          onPressed: onCompletar,
+          icon: const Icon(Icons.check_circle_outline),
+          label: const Text('Marcar como completada'),
+        ),
+      if (puedeCancelar(estado, rol))
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.coral,
+            side: const BorderSide(color: AppColors.coral),
+          ),
+          onPressed: onCancelar,
+          icon: const Icon(Icons.cancel_outlined),
+          label: const Text('Cancelar orden'),
+        ),
+      if (puedeEditar(estado, rol))
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(backgroundColor: AppColors.panel),
+          onPressed: onEditar,
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Editar'),
+        ),
+      OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(backgroundColor: AppColors.panel),
+        onPressed: onImprimir,
+        icon: const Icon(Icons.print_outlined),
+        label: const Text('Imprimir'),
+      ),
+    ];
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Wrap(
-          spacing: 10,
-          runSpacing: 10,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
-              onPressed: habilitado ? onMarcarEntregada : null,
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('Marcar como entregada'),
-            ),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.coral),
-              onPressed: habilitado ? onCancelarOrden : null,
-              icon: const Icon(Icons.cancel_outlined),
-              label: const Text('Cancelar orden'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onImprimir,
-              icon: const Icon(Icons.print_outlined),
-              label: const Text('Imprimir'),
-            ),
+            Wrap(spacing: 10, runSpacing: 10, children: botones),
+            if (estado == EstadoOrden.completado) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Completada · se conservará y luego se depurará',
+                style: TextStyle(
+                  color: AppColors.slate,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -647,4 +704,11 @@ String _formatearFecha(DateTime fecha) {
   final dia = fecha.day.toString().padLeft(2, '0');
   final mes = fecha.month.toString().padLeft(2, '0');
   return '$dia/$mes/${fecha.year}';
+}
+
+String _formatearFechaIso(DateTime fecha) {
+  final anio = fecha.year.toString().padLeft(4, '0');
+  final mes = fecha.month.toString().padLeft(2, '0');
+  final dia = fecha.day.toString().padLeft(2, '0');
+  return '$anio-$mes-$dia';
 }

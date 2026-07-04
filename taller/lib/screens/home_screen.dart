@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/orden_detalle.dart';
 import '../models/usuario.dart';
 import '../widgets/custom_button.dart';
 import 'ordenes_screen.dart';
@@ -34,8 +35,24 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int selectedIndex = 0;
   int ordenesRefreshToken = 0;
+  OrdenDetalle? ordenEnEdicion;
 
   bool get _isAdmin => widget.currentUser?.rol == 'Administrador';
+
+  void _editarOrden(OrdenDetalle detalle) {
+    setState(() {
+      ordenEnEdicion = detalle;
+      selectedIndex = 2;
+    });
+  }
+
+  void _cerrarEdicionOrden() {
+    setState(() {
+      ordenEnEdicion = null;
+      ordenesRefreshToken++;
+      selectedIndex = 1;
+    });
+  }
 
   static const destinations = [
     _Destination('Inicio', Icons.dashboard_outlined),
@@ -115,15 +132,18 @@ class _MainShellState extends State<MainShell> {
                 OrdenesScreen(
                   currentUser: widget.currentUser,
                   refreshToken: ordenesRefreshToken,
+                  onEditarOrden: _editarOrden,
                 ),
                 ServiceOrderScreen(
                   currentUser: widget.currentUser,
+                  ordenExistente: ordenEnEdicion,
                   onOrderSaved: () {
                     setState(() {
                       ordenesRefreshToken++;
                       selectedIndex = 0;
                     });
                   },
+                  onOrderUpdated: _cerrarEdicionOrden,
                 ),
                 const ModulePlaceholder(
                   icon: Icons.qr_code_2_outlined,

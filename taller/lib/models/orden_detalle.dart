@@ -134,7 +134,7 @@ class OrdenDetalle {
       fechaIngreso: orden['fecha_ingreso'] as String? ?? '',
       fechaCompromiso: orden['fecha_compromiso'] as String?,
       fechaSalida: orden['fecha_salida'] as String?,
-      estado: orden['estado'] as String? ?? 'En Proceso',
+      estado: orden['estado'] as String? ?? 'En revisión',
       kilometrajeIngreso: orden['kilometraje_ingreso'] as int?,
       gasolina: orden['gasolina'] as String?,
       subtotal: (orden['subtotal'] as num?)?.toDouble() ?? 0,
