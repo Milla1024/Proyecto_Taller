@@ -5,6 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../models/orden_detalle.dart';
 import '../models/orden_servicio.dart';
+import '../models/notificacion_usuario.dart';
 import '../models/usuario.dart';
 
 /// Activar SOLO cuando el modulo de facturas persista la transaccion antes
@@ -58,6 +59,7 @@ class ApiService {
     await db.execute('PRAGMA foreign_keys = ON');
     await _prepareEmpleadoTable(db);
     await _prepareServiceOrderTables(db);
+    await _prepareNotificacionUsuarioTable(db);
     await _purgarOrdenesCompletadas(db);
   }
 
@@ -308,6 +310,31 @@ class ApiService {
     await _rebuildOrdenServicioEstadoIfNeeded(db);
   }
 
+  Future<void> _prepareNotificacionUsuarioTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS notificacion_usuario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_empleado INTEGER NOT NULL,
+        no_orden INTEGER NOT NULL,
+        titulo TEXT NOT NULL,
+        mensaje TEXT NOT NULL,
+        estado_anterior TEXT,
+        estado_nuevo TEXT NOT NULL,
+        leida INTEGER DEFAULT 0,
+        fecha_creacion TEXT NOT NULL,
+        FOREIGN KEY (id_empleado) REFERENCES empleado(id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_notificacion_usuario_empleado_leida
+      ON notificacion_usuario(id_empleado, leida, fecha_creacion)
+    ''');
+  }
+
   /// SQLite no permite ALTER de un CHECK existente: si la tabla todavia tiene
   /// el CHECK viejo ('En Proceso', 'Finalizado', 'Cancelado'), la reconstruye
   /// con el CHECK nuevo, mapeando los valores de estado y preservando el
@@ -467,8 +494,7 @@ class ApiService {
       )
     '''
         : '';
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT
         os.no_orden,
         os.descripcion_falla,
@@ -486,9 +512,7 @@ class ApiService {
       JOIN cliente c ON c.id = v.id_cliente
       $filtro
       ORDER BY os.no_orden DESC
-    ''',
-      idEmpleado != null ? [idEmpleado] : [],
-    );
+    ''', idEmpleado != null ? [idEmpleado] : []);
     return rows.map(OrdenServicio.fromMap).toList();
   }
 
@@ -576,33 +600,152 @@ class ApiService {
 
   Future<void> aceptarOrden(int noOrden) async {
     final db = await _db;
-    await db.update(
-      'orden_servicio',
-      {'estado': 'En progreso'},
-      where: 'no_orden = ? AND estado = ?',
-      whereArgs: [noOrden, 'En revisión'],
-    );
+    await db.transaction((txn) async {
+      final updated = await txn.update(
+        'orden_servicio',
+        {'estado': 'En progreso'},
+        where: 'no_orden = ? AND estado = ?',
+        whereArgs: [noOrden, 'En revisión'],
+      );
+      if (updated > 0) {
+        await _registrarCambioEstadoOrden(
+          txn,
+          noOrden: noOrden,
+          estadoAnterior: 'En revisión',
+          estadoNuevo: 'En progreso',
+        );
+      }
+    });
   }
 
   Future<void> cancelarOrden(int noOrden) async {
     final db = await _db;
-    await db.update(
-      'orden_servicio',
-      {'estado': 'Cancelado'},
-      where: 'no_orden = ? AND estado = ?',
-      whereArgs: [noOrden, 'En revisión'],
-    );
+    await db.transaction((txn) async {
+      final updated = await txn.update(
+        'orden_servicio',
+        {'estado': 'Cancelado'},
+        where: 'no_orden = ? AND estado = ?',
+        whereArgs: [noOrden, 'En revisión'],
+      );
+      if (updated > 0) {
+        await _registrarCambioEstadoOrden(
+          txn,
+          noOrden: noOrden,
+          estadoAnterior: 'En revisión',
+          estadoNuevo: 'Cancelado',
+        );
+      }
+    });
   }
 
   /// [fechaSalidaIso] debe ir en formato yyyy-MM-dd: esta fecha tambien
   /// arranca el reloj de retencion para purgarOrdenesCompletadas().
   Future<void> completarOrden(int noOrden, String fechaSalidaIso) async {
     final db = await _db;
+    await db.transaction((txn) async {
+      final updated = await txn.update(
+        'orden_servicio',
+        {'estado': 'Completado', 'fecha_salida': fechaSalidaIso},
+        where: 'no_orden = ? AND estado = ?',
+        whereArgs: [noOrden, 'En progreso'],
+      );
+      if (updated > 0) {
+        await _registrarCambioEstadoOrden(
+          txn,
+          noOrden: noOrden,
+          estadoAnterior: 'En progreso',
+          estadoNuevo: 'Completado',
+        );
+      }
+    });
+  }
+
+  Future<void> _registrarCambioEstadoOrden(
+    Transaction txn, {
+    required int noOrden,
+    required String estadoAnterior,
+    required String estadoNuevo,
+  }) async {
+    final empleados = await txn.query(
+      'trabaja',
+      columns: ['id_empleado'],
+      where: 'no_orden = ?',
+      whereArgs: [noOrden],
+    );
+    if (empleados.isEmpty) {
+      return;
+    }
+
+    final fechaCreacion = DateTime.now().toIso8601String();
+    final titulo = 'Cambio de estado en OT-$noOrden';
+    final mensaje =
+        'La orden OT-$noOrden cambio de $estadoAnterior a $estadoNuevo.';
+    for (final empleado in empleados) {
+      await txn.insert('notificacion_usuario', {
+        'id_empleado': empleado['id_empleado'],
+        'no_orden': noOrden,
+        'titulo': titulo,
+        'mensaje': mensaje,
+        'estado_anterior': estadoAnterior,
+        'estado_nuevo': estadoNuevo,
+        'leida': 0,
+        'fecha_creacion': fechaCreacion,
+      });
+    }
+  }
+
+  Future<List<NotificacionUsuario>> listarNotificacionesUsuario(
+    int idEmpleado,
+  ) async {
+    final db = await _db;
+    final rows = await db.query(
+      'notificacion_usuario',
+      where: 'id_empleado = ?',
+      whereArgs: [idEmpleado],
+      orderBy: 'datetime(fecha_creacion) DESC, id DESC',
+    );
+    return rows.map(NotificacionUsuario.fromMap).toList();
+  }
+
+  Future<int> contarNotificacionesNoLeidas(int idEmpleado) async {
+    final db = await _db;
+    final rows = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS total
+      FROM notificacion_usuario
+      WHERE id_empleado = ? AND leida = 0
+    ''',
+      [idEmpleado],
+    );
+    return rows.first['total'] as int? ?? 0;
+  }
+
+  Future<void> marcarNotificacionLeida(int idNotificacion) async {
+    final db = await _db;
     await db.update(
-      'orden_servicio',
-      {'estado': 'Completado', 'fecha_salida': fechaSalidaIso},
-      where: 'no_orden = ? AND estado = ?',
-      whereArgs: [noOrden, 'En progreso'],
+      'notificacion_usuario',
+      {'leida': 1},
+      where: 'id = ?',
+      whereArgs: [idNotificacion],
+    );
+  }
+
+  Future<void> marcarTodasNotificacionesLeidas(int idEmpleado) async {
+    final db = await _db;
+    await db.update(
+      'notificacion_usuario',
+      {'leida': 1},
+      where: 'id_empleado = ?',
+      whereArgs: [idEmpleado],
+    );
+  }
+
+  Future<void> eliminarNotificacion(int idNotificacion) async {
+    final db = await _db;
+    await db.delete(
+      'notificacion_usuario',
+      where: 'id = ?',
+      whereArgs: [idNotificacion],
     );
   }
 
@@ -852,11 +995,7 @@ class ApiService {
         });
       }
 
-      await txn.delete(
-        'trabaja',
-        where: 'no_orden = ?',
-        whereArgs: [noOrden],
-      );
+      await txn.delete('trabaja', where: 'no_orden = ?', whereArgs: [noOrden]);
       for (final entry in empleadosAsignados.entries) {
         await txn.insert('trabaja', {
           'id_empleado': entry.key,

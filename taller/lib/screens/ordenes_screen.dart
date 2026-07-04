@@ -15,11 +15,13 @@ class OrdenesScreen extends StatefulWidget {
     this.currentUser,
     this.refreshToken = 0,
     this.onEditarOrden,
+    this.onNotificationsChanged,
   });
 
   final Usuario? currentUser;
   final int refreshToken;
   final ValueChanged<OrdenDetalle>? onEditarOrden;
+  final Future<void> Function()? onNotificationsChanged;
 
   @override
   State<OrdenesScreen> createState() => _OrdenesScreenState();
@@ -84,6 +86,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
           noOrden: noOrden,
           currentUser: widget.currentUser,
           onEditarOrden: widget.onEditarOrden,
+          onNotificationsChanged: widget.onNotificationsChanged,
         ),
       ),
     );

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../models/orden_detalle.dart';
 import '../models/usuario.dart';
+import '../services/api_service.dart';
 import '../widgets/custom_button.dart';
+import 'notifications_sheet.dart';
 import 'ordenes_screen.dart';
 import 'service_order_screen.dart';
 import 'user_management_screen.dart';
@@ -35,14 +37,80 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int selectedIndex = 0;
   int ordenesRefreshToken = 0;
+  int serviceOrderRefreshToken = 0;
+  int usuariosRefreshToken = 0;
+  int notificacionesNoLeidas = 0;
   OrdenDetalle? ordenEnEdicion;
 
   bool get _isAdmin => widget.currentUser?.rol == 'Administrador';
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarConteoNotificaciones();
+  }
+
+  @override
+  void didUpdateWidget(covariant MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUser?.id != widget.currentUser?.id) {
+      _cargarConteoNotificaciones();
+    }
+  }
+
+  Future<void> _cargarConteoNotificaciones() async {
+    final idEmpleado = widget.currentUser?.id;
+    if (idEmpleado == null) {
+      setState(() => notificacionesNoLeidas = 0);
+      return;
+    }
+
+    final count = await ApiService.instance.contarNotificacionesNoLeidas(
+      idEmpleado,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() => notificacionesNoLeidas = count);
+  }
+
+  Future<void> _abrirNotificaciones() async {
+    final idEmpleado = widget.currentUser?.id;
+    if (idEmpleado == null) {
+      return;
+    }
+
+    await _cargarConteoNotificaciones();
+    if (!mounted) {
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => NotificationsSheet(
+        idEmpleado: idEmpleado,
+        onChanged: _cargarConteoNotificaciones,
+      ),
+    );
+    await _cargarConteoNotificaciones();
+  }
+
+  void _seleccionarVentana(int value) {
+    setState(() {
+      selectedIndex = value;
+      ordenesRefreshToken++;
+      serviceOrderRefreshToken++;
+      usuariosRefreshToken++;
+    });
+    _cargarConteoNotificaciones();
+  }
 
   void _editarOrden(OrdenDetalle detalle) {
     setState(() {
       ordenEnEdicion = detalle;
       selectedIndex = 2;
+      serviceOrderRefreshToken++;
     });
   }
 
@@ -50,6 +118,7 @@ class _MainShellState extends State<MainShell> {
     setState(() {
       ordenEnEdicion = null;
       ordenesRefreshToken++;
+      serviceOrderRefreshToken++;
       selectedIndex = 1;
     });
   }
@@ -79,9 +148,10 @@ class _MainShellState extends State<MainShell> {
         actions: [
           IconButton(
             tooltip: 'Notificaciones',
-            onPressed: () {},
-            icon: const Badge(
-              label: Text('3'),
+            onPressed: _abrirNotificaciones,
+            icon: Badge(
+              isLabelVisible: notificacionesNoLeidas > 0,
+              label: Text('$notificacionesNoLeidas'),
               child: Icon(Icons.notifications_none_outlined),
             ),
           ),
@@ -102,9 +172,7 @@ class _MainShellState extends State<MainShell> {
           if (isWide)
             NavigationRail(
               selectedIndex: selectedIndex,
-              onDestinationSelected: (value) {
-                setState(() => selectedIndex = value);
-              },
+              onDestinationSelected: _seleccionarVentana,
               labelType: NavigationRailLabelType.all,
               backgroundColor: AppColors.panel,
               selectedIconTheme: const IconThemeData(color: AppColors.teal),
@@ -125,21 +193,24 @@ class _MainShellState extends State<MainShell> {
               index: selectedIndex,
               children: [
                 DashboardView(
-                  onCreateOrder: () => setState(() => selectedIndex = 2),
-                  onOpenUsuarios: () => setState(() => selectedIndex = 5),
+                  onCreateOrder: () => _seleccionarVentana(2),
+                  onOpenUsuarios: () => _seleccionarVentana(5),
                   showUsuarios: _isAdmin,
                 ),
                 OrdenesScreen(
                   currentUser: widget.currentUser,
                   refreshToken: ordenesRefreshToken,
                   onEditarOrden: _editarOrden,
+                  onNotificationsChanged: _cargarConteoNotificaciones,
                 ),
                 ServiceOrderScreen(
                   currentUser: widget.currentUser,
+                  refreshToken: serviceOrderRefreshToken,
                   ordenExistente: ordenEnEdicion,
                   onOrderSaved: () {
                     setState(() {
                       ordenesRefreshToken++;
+                      serviceOrderRefreshToken++;
                       selectedIndex = 0;
                     });
                   },
@@ -157,7 +228,7 @@ class _MainShellState extends State<MainShell> {
                   description:
                       'Historial de facturas, filtros, impresion y exportacion a Excel.',
                 ),
-                const UserManagementScreen(),
+                UserManagementScreen(refreshToken: usuariosRefreshToken),
               ],
             ),
           ),
@@ -167,9 +238,7 @@ class _MainShellState extends State<MainShell> {
           ? null
           : NavigationBar(
               selectedIndex: selectedIndex,
-              onDestinationSelected: (value) {
-                setState(() => selectedIndex = value);
-              },
+              onDestinationSelected: _seleccionarVentana,
               destinations: [
                 for (final destination in visibleDestinations)
                   NavigationDestination(

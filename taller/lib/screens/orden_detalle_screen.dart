@@ -17,11 +17,13 @@ class OrdenDetalleScreen extends StatefulWidget {
     required this.noOrden,
     this.currentUser,
     this.onEditarOrden,
+    this.onNotificationsChanged,
   });
 
   final int noOrden;
   final Usuario? currentUser;
   final ValueChanged<OrdenDetalle>? onEditarOrden;
+  final Future<void> Function()? onNotificationsChanged;
 
   @override
   State<OrdenDetalleScreen> createState() => _OrdenDetalleScreenState();
@@ -57,6 +59,7 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
   Future<void> _imprimirYAceptar(OrdenDetalle detalle) async {
     await _imprimir(detalle);
     await ApiService.instance.aceptarOrden(widget.noOrden);
+    await widget.onNotificationsChanged?.call();
     if (!mounted) {
       return;
     }
@@ -132,6 +135,7 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
       widget.noOrden,
       _formatearFechaIso(confirmado),
     );
+    await widget.onNotificationsChanged?.call();
     if (!mounted) {
       return;
     }
@@ -166,6 +170,7 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
     }
 
     await ApiService.instance.cancelarOrden(widget.noOrden);
+    await widget.onNotificationsChanged?.call();
     if (!mounted) {
       return;
     }
@@ -358,7 +363,10 @@ class VehiculoDetalleSection extends StatelessWidget {
         spacing: 24,
         runSpacing: 16,
         children: [
-          ProfileField(label: 'Placas', value: _mostrar(detalle.vehiculoPlacas)),
+          ProfileField(
+            label: 'Placas',
+            value: _mostrar(detalle.vehiculoPlacas),
+          ),
           ProfileField(
             label: 'Marca y modelo',
             value: '${detalle.vehiculoMarca} ${detalle.vehiculoModelo}',
@@ -429,7 +437,10 @@ class FallaDetalleSection extends StatelessWidget {
           const SizedBox(height: 12),
           const Text(
             'Observaciones',
-            style: TextStyle(color: AppColors.slate, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              color: AppColors.slate,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 4),
           Text(_mostrar(detalle.observaciones)),

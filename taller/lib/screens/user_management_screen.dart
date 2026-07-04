@@ -9,7 +9,9 @@ import 'service_order_screen.dart';
 const _roles = ['Administrador', 'Mecánico', 'Ayudante'];
 
 class UserManagementScreen extends StatefulWidget {
-  const UserManagementScreen({super.key});
+  const UserManagementScreen({super.key, this.refreshToken = 0});
+
+  final int refreshToken;
 
   @override
   State<UserManagementScreen> createState() => _UserManagementScreenState();
@@ -26,6 +28,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   void initState() {
     super.initState();
     _cargarUsuarios();
+  }
+
+  @override
+  void didUpdateWidget(covariant UserManagementScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _cargarUsuarios();
+    }
   }
 
   @override
@@ -78,7 +88,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${updated.nombre} fue actualizado correctamente.')),
+      SnackBar(
+        content: Text('${updated.nombre} fue actualizado correctamente.'),
+      ),
     );
   }
 
@@ -272,7 +284,11 @@ class UserSearchBar extends StatelessWidget {
           filled: true,
           fillColor: AppColors.panel,
           hintText: 'Nombre, telefono o rol',
-          prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.slate),
+          prefixIcon: const Icon(
+            Icons.search,
+            size: 20,
+            color: AppColors.slate,
+          ),
           suffixIcon: controller.text.isEmpty
               ? null
               : IconButton(
@@ -344,7 +360,8 @@ class UserTable extends StatelessWidget {
                 children: [
                   const UserTableHeaderRow(),
                   for (var i = 0; i < usuarios.length; i++) ...[
-                    if (i > 0) const Divider(height: 1, color: AppColors.border),
+                    if (i > 0)
+                      const Divider(height: 1, color: AppColors.border),
                     UserTableRow(
                       usuario: usuarios[i],
                       onViewProfile: () => onViewProfile(usuarios[i]),
@@ -380,10 +397,7 @@ class UserTableHeaderRow extends StatelessWidget {
       child: const Row(
         children: [
           Expanded(flex: 5, child: Text('NOMBRE', style: _headerStyle)),
-          Expanded(
-            flex: 3,
-            child: Text('TELEFONO', style: _headerStyle),
-          ),
+          Expanded(flex: 3, child: Text('TELEFONO', style: _headerStyle)),
           Expanded(flex: 3, child: Text('ROL', style: _headerStyle)),
           SizedBox(
             width: 64,
@@ -614,9 +628,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                 validator: requiredField,
               ),
               AppTextField(
-                label: isEditing
-                    ? 'Nueva contrasena (opcional)'
-                    : 'Contrasena',
+                label: isEditing ? 'Nueva contrasena (opcional)' : 'Contrasena',
                 controller: contrasenaController,
                 obscureText: true,
                 validator: isEditing ? null : requiredField,
@@ -701,7 +713,12 @@ class UserProfileScreen extends StatelessWidget {
                         style: Theme.of(context).textTheme.headlineMedium,
                       ),
                     ),
-                    Center(child: RoleChip(label: usuario.rol, active: usuario.activo)),
+                    Center(
+                      child: RoleChip(
+                        label: usuario.rol,
+                        active: usuario.activo,
+                      ),
+                    ),
                     const SizedBox(height: 24),
                     ProfileField(label: 'Telefono', value: usuario.telefono),
                     ProfileField(
