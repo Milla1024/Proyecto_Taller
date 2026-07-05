@@ -196,8 +196,7 @@ class _MainShellState extends State<MainShell> {
               children: [
                 DashboardView(
                   onCreateOrder: () => _seleccionarVentana(2),
-                  onOpenUsuarios: () => _seleccionarVentana(5),
-                  showUsuarios: _isAdmin,
+                  idEmpleado: _isAdmin ? null : widget.currentUser?.id,
                 ),
                 OrdenesScreen(
                   currentUser: widget.currentUser,
@@ -252,66 +251,89 @@ class DashboardView extends StatelessWidget {
   const DashboardView({
     super.key,
     required this.onCreateOrder,
-    required this.onOpenUsuarios,
-    required this.showUsuarios,
+    this.idEmpleado,
   });
 
   final VoidCallback onCreateOrder;
-  final VoidCallback onOpenUsuarios;
-  final bool showUsuarios;
+  final int? idEmpleado;
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          HeaderSection(onCreateOrder: onCreateOrder),
-          const SizedBox(height: 20),
-          const SummaryGrid(),
-          const SizedBox(height: 20),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 980;
-              if (!isWide) {
-                return const Column(
-                  children: [
-                    ActiveOrdersPanel(),
-                    SizedBox(height: 20),
-                    StatsPanel(),
-                    SizedBox(height: 20),
-                    ReminderPanel(),
-                  ],
-                );
-              }
+    return FutureBuilder<DashboardStats>(
+      future: ApiService.instance.obtenerDashboardStats(idEmpleado: idEmpleado),
+      builder: (context, snapshot) {
+        final stats = snapshot.data;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              HeaderSection(onCreateOrder: onCreateOrder),
+              const SizedBox(height: 20),
+              if (snapshot.hasError)
+                EmptyPanelText('No se pudieron cargar las estadisticas.')
+              else if (stats == null)
+                const DashboardLoading()
+              else ...[
+                SummaryGrid(stats: stats),
+                const SizedBox(height: 20),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth >= 980;
+                    if (!isWide) {
+                      return Column(
+                        children: [
+                          ActiveOrdersPanel(orders: stats.ordenesRecientes),
+                          const SizedBox(height: 20),
+                          StatsPanel(stats: stats.serviciosMes),
+                          const SizedBox(height: 20),
+                          ReminderPanel(avisos: stats.avisos),
+                        ],
+                      );
+                    }
 
-              return const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 3, child: ActiveOrdersPanel()),
-                  SizedBox(width: 20),
-                  Expanded(
-                    flex: 2,
-                    child: Column(
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        StatsPanel(),
-                        SizedBox(height: 20),
-                        ReminderPanel(),
+                        Expanded(
+                          flex: 3,
+                          child: ActiveOrdersPanel(
+                            orders: stats.ordenesRecientes,
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            children: [
+                              StatsPanel(stats: stats.serviciosMes),
+                              const SizedBox(height: 20),
+                              ReminderPanel(avisos: stats.avisos),
+                            ],
+                          ),
+                        ),
                       ],
-                    ),
-                  ),
-                ],
-              );
-            },
+                    );
+                  },
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 20),
-          ModuleGrid(
-            onOpenServiceOrder: onCreateOrder,
-            onOpenUsuarios: onOpenUsuarios,
-            showUsuarios: showUsuarios,
-          ),
-        ],
+        );
+      },
+    );
+  }
+}
+
+class DashboardLoading extends StatelessWidget {
+  const DashboardLoading({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      height: 260,
+      child: Center(
+        child: CircularProgressIndicator(),
       ),
     );
   }
@@ -357,40 +379,42 @@ class HeaderSection extends StatelessWidget {
 }
 
 class SummaryGrid extends StatelessWidget {
-  const SummaryGrid({super.key});
+  const SummaryGrid({super.key, required this.stats});
 
-  static const items = [
+  final DashboardStats stats;
+
+  List<SummaryItem> get items => [
     SummaryItem(
       'Ordenes activas',
-      '18',
-      '+4 hoy',
+      '${stats.ordenesActivas}',
+      '+${stats.ordenesHoy} hoy',
       Icons.build_circle_outlined,
       AppColors.teal,
       AppColors.softGray,
     ),
     SummaryItem(
       'Vehiculos por entregar',
-      '6',
-      '3 urgentes',
+      '${stats.porEntregar}',
+      '${stats.urgentes} urgentes',
       Icons.local_shipping_outlined,
       AppColors.steel,
       AppColors.softGray,
     ),
     SummaryItem(
       'Facturado este mes',
-      'L 82,450',
-      '+12%',
+      _formatCurrency(stats.facturadoMes),
+      '${stats.facturasMes} facturas',
       Icons.payments_outlined,
       AppColors.steel,
       AppColors.softGray,
     ),
     SummaryItem(
       'Alertas pendientes',
-      '3',
-      'Revisar ahora',
+      '${stats.alertasPendientes}',
+      stats.alertasPendientes == 0 ? 'Al dia' : 'Revisar ahora',
       Icons.warning_amber_outlined,
-      AppColors.coral,
-      AppColors.coralSoft,
+      stats.alertasPendientes == 0 ? AppColors.teal : AppColors.coral,
+      stats.alertasPendientes == 0 ? AppColors.tealSoft : AppColors.coralSoft,
     ),
   ];
 
@@ -467,52 +491,21 @@ class SummaryCard extends StatelessWidget {
 }
 
 class ActiveOrdersPanel extends StatelessWidget {
-  const ActiveOrdersPanel({super.key});
+  const ActiveOrdersPanel({super.key, required this.orders});
 
-  static const orders = [
-    OrderItem(
-      'OT-1042',
-      'Toyota Hilux',
-      'Cambio de clutch',
-      'Alta',
-      0.78,
-      AppColors.coral,
-    ),
-    OrderItem(
-      'OT-1041',
-      'Honda Civic',
-      'Mantenimiento general',
-      'Media',
-      0.46,
-      AppColors.amber,
-    ),
-    OrderItem(
-      'OT-1039',
-      'Nissan Frontier',
-      'Diagnostico electrico',
-      'Media',
-      0.32,
-      AppColors.amber,
-    ),
-    OrderItem(
-      'OT-1037',
-      'Hyundai Tucson',
-      'Revision de frenos',
-      'Baja',
-      0.88,
-      AppColors.teal,
-    ),
-  ];
+  final List<DashboardOrderItem> orders;
 
   @override
   Widget build(BuildContext context) {
     return SectionSurface(
-      title: 'Ordenes activas',
+      title: 'Ultimas ordenes',
       actionLabel: 'Ver todas',
       icon: Icons.tune_outlined,
-      child: Column(
-        children: [for (final order in orders) OrderRow(order: order)],
-      ),
+      child: orders.isEmpty
+          ? const EmptyPanelText('Todavia no hay ordenes registradas.')
+          : Column(
+              children: [for (final order in orders) OrderRow(order: order)],
+            ),
     );
   }
 }
@@ -520,7 +513,7 @@ class ActiveOrdersPanel extends StatelessWidget {
 class OrderRow extends StatelessWidget {
   const OrderRow({super.key, required this.order});
 
-  final OrderItem order;
+  final DashboardOrderItem order;
 
   @override
   Widget build(BuildContext context) {
@@ -546,24 +539,25 @@ class OrderRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  order.vehicle,
+                  order.vehiculo,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 4),
-                Text('${order.code} - ${order.service}'),
+                Text('OT-${order.noOrden} - ${order.descripcion}'),
                 const SizedBox(height: 10),
-                LinearProgressIndicator(
-                  value: order.progress,
-                  minHeight: 7,
-                  borderRadius: BorderRadius.circular(8),
-                  color: AppColors.teal,
-                  backgroundColor: AppColors.mist,
+                Text(
+                  'Ingreso: ${order.fechaIngreso}'
+                  '${order.fechaCompromiso == null || order.fechaCompromiso!.isEmpty ? '' : ' - Compromiso: ${order.fechaCompromiso}'}',
+                  style: const TextStyle(color: AppColors.slate),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 12),
-          PriorityChip(label: order.priority, color: order.color),
+          PriorityChip(
+            label: order.estado,
+            color: _statusColor(order.estado),
+          ),
         ],
       ),
     );
@@ -571,14 +565,9 @@ class OrderRow extends StatelessWidget {
 }
 
 class StatsPanel extends StatelessWidget {
-  const StatsPanel({super.key});
+  const StatsPanel({super.key, required this.stats});
 
-  static const stats = [
-    StatItem('Mecanica general', 42, AppColors.teal),
-    StatItem('Frenos', 28, AppColors.teal),
-    StatItem('Diagnostico', 18, AppColors.teal),
-    StatItem('Electricidad', 12, AppColors.teal),
-  ];
+  final List<DashboardServiceStat> stats;
 
   @override
   Widget build(BuildContext context) {
@@ -591,7 +580,10 @@ class StatsPanel extends StatelessWidget {
         children: [
           const Text('Distribucion del mes actual'),
           const SizedBox(height: 16),
-          for (final stat in stats) StatBar(stat: stat),
+          if (stats.isEmpty)
+            const EmptyPanelText('Aun no hay servicios registrados este mes.')
+          else
+            for (final stat in stats) StatBar(stat: stat),
         ],
       ),
     );
@@ -601,7 +593,7 @@ class StatsPanel extends StatelessWidget {
 class StatBar extends StatelessWidget {
   const StatBar({super.key, required this.stat});
 
-  final StatItem stat;
+  final DashboardServiceStat stat;
 
   @override
   Widget build(BuildContext context) {
@@ -613,22 +605,22 @@ class StatBar extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  stat.label,
+                  stat.tipo,
                   style: const TextStyle(
                     color: AppColors.ink,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              Text('${stat.value}%'),
+              Text('${stat.porcentaje}%'),
             ],
           ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
-            value: stat.value / 100,
+            value: stat.porcentaje / 100,
             minHeight: 8,
             borderRadius: BorderRadius.circular(8),
-            color: stat.color,
+            color: AppColors.teal,
             backgroundColor: AppColors.mist,
           ),
         ],
@@ -638,7 +630,9 @@ class StatBar extends StatelessWidget {
 }
 
 class ReminderPanel extends StatelessWidget {
-  const ReminderPanel({super.key});
+  const ReminderPanel({super.key, required this.avisos});
+
+  final List<DashboardReminderItem> avisos;
 
   @override
   Widget build(BuildContext context) {
@@ -647,22 +641,13 @@ class ReminderPanel extends StatelessWidget {
       actionLabel: 'Recordatorios',
       icon: Icons.schedule_outlined,
       child: Column(
-        children: const [
-          ReminderTile(
-            title: 'Honda Civic listo para entrega',
-            subtitle: 'Cliente avisado por correo - 2:30 PM',
-            color: AppColors.steel,
-          ),
-          ReminderTile(
-            title: 'Toyota Hilux requiere autorizacion',
-            subtitle: 'Pendiente aprobacion de repuesto',
-            color: AppColors.coral,
-          ),
-          ReminderTile(
-            title: 'Nissan Frontier vence manana',
-            subtitle: 'Prioridad media, avance 32%',
-            color: AppColors.amber,
-          ),
+        children: [
+          for (final aviso in avisos)
+            ReminderTile(
+              title: aviso.titulo,
+              subtitle: aviso.subtitulo,
+              color: _reminderColor(aviso.tipo),
+            ),
         ],
       ),
     );
@@ -708,129 +693,6 @@ class ReminderTile extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class ModuleGrid extends StatelessWidget {
-  const ModuleGrid({
-    super.key,
-    required this.onOpenServiceOrder,
-    required this.onOpenUsuarios,
-    required this.showUsuarios,
-  });
-
-  final VoidCallback onOpenServiceOrder;
-  final VoidCallback onOpenUsuarios;
-  final bool showUsuarios;
-
-  static const modules = [
-    ModuleItem(
-      'Mantenimientos',
-      'Guardar detalle tecnico del vehiculo',
-      Icons.car_repair_outlined,
-      AppColors.steel,
-    ),
-    ModuleItem(
-      'Usuarios',
-      'CRUD para administradores y vista por rol',
-      Icons.manage_accounts_outlined,
-      AppColors.steel,
-    ),
-    ModuleItem(
-      'Estado inicial',
-      'Recepcion y condicion del vehiculo',
-      Icons.fact_check_outlined,
-      AppColors.steel,
-    ),
-    ModuleItem(
-      'Cliente QR',
-      'Link de seguimiento y envio por correo',
-      Icons.qr_code_2_outlined,
-      AppColors.steel,
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final visibleModules = showUsuarios
-        ? modules
-        : modules.where((module) => module.title != 'Usuarios').toList();
-
-    return SectionSurface(
-      title: 'Modulos del sistema',
-      actionLabel: 'Configurar',
-      icon: Icons.apps_outlined,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columns = constraints.maxWidth >= 900
-              ? 4
-              : constraints.maxWidth >= 560
-              ? 2
-              : 1;
-          return GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: visibleModules.length,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              mainAxisExtent: 176,
-            ),
-            itemBuilder: (context, index) => ModuleCard(
-              module: visibleModules[index],
-              onTap: () {
-                switch (visibleModules[index].title) {
-                  case 'Estado inicial':
-                    onOpenServiceOrder();
-                    break;
-                  case 'Usuarios':
-                    onOpenUsuarios();
-                    break;
-                }
-              },
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class ModuleCard extends StatelessWidget {
-  const ModuleCard({super.key, required this.module, required this.onTap});
-
-  final ModuleItem module;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(module.icon, color: module.color, size: 30),
-              const Spacer(),
-              Text(
-                module.title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 6),
-              Text(module.description),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -1985,6 +1847,26 @@ class PriorityChip extends StatelessWidget {
   }
 }
 
+class EmptyPanelText extends StatelessWidget {
+  const EmptyPanelText(this.message, {super.key});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        color: AppColors.mist,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Text(message, style: const TextStyle(color: AppColors.slate)),
+    );
+  }
+}
+
 class _Destination {
   const _Destination(this.label, this.icon);
 
@@ -2010,37 +1892,43 @@ class SummaryItem {
   final Color softColor;
 }
 
-class OrderItem {
-  const OrderItem(
-    this.code,
-    this.vehicle,
-    this.service,
-    this.priority,
-    this.progress,
-    this.color,
-  );
-
-  final String code;
-  final String vehicle;
-  final String service;
-  final String priority;
-  final double progress;
-  final Color color;
+Color _statusColor(String estado) {
+  switch (estado) {
+    case 'En revisión':
+      return AppColors.amber;
+    case 'En progreso':
+      return AppColors.teal;
+    case 'Completado':
+      return AppColors.steel;
+    case 'Cancelado':
+      return AppColors.coral;
+    default:
+      return AppColors.steel;
+  }
 }
 
-class StatItem {
-  const StatItem(this.label, this.value, this.color);
-
-  final String label;
-  final int value;
-  final Color color;
+Color _reminderColor(DashboardReminderType tipo) {
+  switch (tipo) {
+    case DashboardReminderType.danger:
+      return AppColors.coral;
+    case DashboardReminderType.warning:
+      return AppColors.amber;
+    case DashboardReminderType.info:
+      return AppColors.teal;
+  }
 }
 
-class ModuleItem {
-  const ModuleItem(this.title, this.description, this.icon, this.color);
-
-  final String title;
-  final String description;
-  final IconData icon;
-  final Color color;
+String _formatCurrency(double value) {
+  final fixed = value.toStringAsFixed(2);
+  final parts = fixed.split('.');
+  final whole = parts.first;
+  final buffer = StringBuffer();
+  for (var i = 0; i < whole.length; i++) {
+    final remaining = whole.length - i;
+    buffer.write(whole[i]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  return 'L ${buffer.toString()}.${parts.last}';
 }

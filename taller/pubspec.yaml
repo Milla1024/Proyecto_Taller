@@ -39,9 +39,9 @@ dependencies:
   printing: ^5.14.2
   sqflite_common_ffi: ^2.3.6
   web: ^1.1.1
-  mailer: ^6.1.2
-  flutter_dotenv: ^5.2.1
-  file_picker: ^8.1.2
+  mailer: ^7.1.0
+  flutter_dotenv: ^6.0.1
+  file_picker: ^11.0.2
   image: ^4.2.0
 
 dev_dependencies:
