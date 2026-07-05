@@ -53,6 +53,52 @@ class ServiceOrderPrintData {
   final bool acceptsTerms;
 }
 
+class InvoicePrintLine {
+  const InvoicePrintLine({
+    required this.product,
+    required this.quantity,
+    required this.unitPrice,
+    required this.total,
+  });
+
+  final String product;
+  final double quantity;
+  final double unitPrice;
+  final double total;
+}
+
+class InvoicePrintData {
+  const InvoicePrintData({
+    required this.invoiceNumber,
+    required this.customerName,
+    required this.customerDocument,
+    required this.customerPhone,
+    required this.customerAddress,
+    required this.date,
+    required this.lines,
+    required this.subtotal,
+    required this.discountPercent,
+    required this.discountAmount,
+    required this.taxPercent,
+    required this.tax,
+    required this.total,
+  });
+
+  final String invoiceNumber;
+  final String customerName;
+  final String customerDocument;
+  final String customerPhone;
+  final String customerAddress;
+  final String date;
+  final List<InvoicePrintLine> lines;
+  final double subtotal;
+  final double discountPercent;
+  final double discountAmount;
+  final double taxPercent;
+  final double tax;
+  final double total;
+}
+
 Future<void> printServiceOrder(ServiceOrderPrintData data) async {
   final document = pw.Document();
   final logoImage = await _loadLogoImage();
@@ -94,6 +140,37 @@ Future<void> printServiceOrder(ServiceOrderPrintData data) async {
 
   await Printing.layoutPdf(
     name: 'orden_servicio_${data.orderNumber}.pdf',
+    onLayout: (_) async => document.save(),
+  );
+}
+
+Future<void> printInvoice(InvoicePrintData data) async {
+  final document = pw.Document();
+  final logoImage = await _loadLogoImage();
+
+  document.addPage(
+    pw.Page(
+      pageFormat: PdfPageFormat.letter,
+      margin: const pw.EdgeInsets.fromLTRB(40, 42, 40, 36),
+      build: (context) {
+        return pw.DefaultTextStyle(
+          style: const pw.TextStyle(fontSize: 9),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              _invoiceHeader(logoImage),
+              _invoiceCustomerBlock(data),
+              _invoiceTable(data),
+              _invoiceFooter(data),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  await Printing.layoutPdf(
+    name: 'factura_${data.invoiceNumber}.pdf',
     onLayout: (_) async => document.save(),
   );
 }
@@ -186,6 +263,220 @@ pw.Widget _header(pw.MemoryImage? logoImage) {
         ),
       ),
     ],
+  );
+}
+
+pw.Widget _invoiceHeader(pw.MemoryImage? logoImage) {
+  return pw.Container(
+    height: 98,
+    decoration: pw.BoxDecoration(border: pw.Border.all(width: 1.1)),
+    child: pw.Row(
+      children: [
+        pw.Container(
+          width: 136,
+          alignment: pw.Alignment.center,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(right: pw.BorderSide(width: 1.1)),
+          ),
+          child: logoImage == null
+              ? pw.Text(
+                  'LOGO',
+                  style: const pw.TextStyle(
+                    color: PdfColors.grey500,
+                    fontSize: 18,
+                  ),
+                )
+              : pw.Padding(
+                  padding: const pw.EdgeInsets.all(8),
+                  child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                ),
+        ),
+        pw.Expanded(
+          child: pw.Center(
+            child: pw.Text(
+              'FACTURA',
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                fontSize: 42,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+pw.Widget _invoiceCustomerBlock(InvoicePrintData data) {
+  return pw.Table(
+    border: pw.TableBorder.all(width: 1.0),
+    columnWidths: const {
+      0: pw.FlexColumnWidth(1.5),
+      1: pw.FlexColumnWidth(2.4),
+      2: pw.FlexColumnWidth(1.3),
+      3: pw.FlexColumnWidth(2.4),
+    },
+    children: [
+      _invoiceInfoRow('Nombre', data.customerName, '', ''),
+      _invoiceInfoRow(
+        'Cedula/NIT',
+        data.customerDocument,
+        'Telefono',
+        data.customerPhone,
+      ),
+      _invoiceInfoRow(
+        'Direccion',
+        data.customerAddress,
+        'Factura No.',
+        data.invoiceNumber,
+      ),
+      _invoiceInfoRow('Fecha', data.date, '', ''),
+    ],
+  );
+}
+
+pw.TableRow _invoiceInfoRow(
+  String labelA,
+  String valueA,
+  String labelB,
+  String valueB,
+) {
+  return pw.TableRow(
+    children: [
+      _invoiceCell(labelA, bold: true, align: pw.Alignment.centerLeft),
+      _invoiceCell(valueA, align: pw.Alignment.centerLeft),
+      _invoiceCell(labelB, bold: labelB.isNotEmpty),
+      _invoiceCell(valueB, align: pw.Alignment.centerLeft),
+    ],
+  );
+}
+
+pw.Widget _invoiceTable(InvoicePrintData data) {
+  const minRows = 14;
+  final emptyRows = (minRows - data.lines.length).clamp(0, minRows).toInt();
+
+  return pw.Table(
+    border: pw.TableBorder.all(width: 1.0),
+    columnWidths: const {
+      0: pw.FlexColumnWidth(2.5),
+      1: pw.FlexColumnWidth(1.1),
+      2: pw.FlexColumnWidth(2.2),
+      3: pw.FlexColumnWidth(2.0),
+    },
+    children: [
+      pw.TableRow(
+        children: [
+          _invoiceCell('Producto', bold: true),
+          _invoiceCell('Cantidad', bold: true),
+          _invoiceCell('Precio Unitario', bold: true),
+          _invoiceCell('Total', bold: true),
+        ],
+      ),
+      for (final line in data.lines)
+        pw.TableRow(
+          children: [
+            _invoiceCell(line.product, align: pw.Alignment.centerLeft),
+            _invoiceCell(_formatQuantity(line.quantity)),
+            _invoiceCell(
+              _formatMoney(line.unitPrice),
+              align: pw.Alignment.centerRight,
+            ),
+            _invoiceCell(
+              _formatMoney(line.total),
+              align: pw.Alignment.centerRight,
+            ),
+          ],
+        ),
+      for (var i = 0; i < emptyRows; i++)
+        pw.TableRow(
+          children: [
+            _invoiceCell(''),
+            _invoiceCell(''),
+            _invoiceCell(''),
+            _invoiceCell(''),
+          ],
+        ),
+    ],
+  );
+}
+
+pw.Widget _invoiceFooter(InvoicePrintData data) {
+  return pw.Table(
+    border: pw.TableBorder.all(width: 1.0),
+    columnWidths: const {
+      0: pw.FlexColumnWidth(2.5),
+      1: pw.FlexColumnWidth(1.1),
+      2: pw.FlexColumnWidth(2.2),
+      3: pw.FlexColumnWidth(2.0),
+    },
+    children: [
+      _invoiceTotalTableRow('', '', 'Subtotal', _formatMoney(data.subtotal)),
+      _invoiceTotalTableRow(
+        '',
+        '',
+        'Descuento ${data.discountPercent.toStringAsFixed(2)}%',
+        _formatMoney(data.discountAmount),
+      ),
+      _invoiceTotalTableRow(
+        '',
+        '',
+        'Impuesto ${data.taxPercent.toStringAsFixed(2)}%',
+        _formatMoney(data.tax),
+      ),
+      _invoiceTotalTableRow(
+        '',
+        '',
+        'Total Factura',
+        _formatMoney(data.total),
+        bold: true,
+      ),
+      _invoiceTotalTableRow('Despachado por:', '', '', ''),
+      _invoiceTotalTableRow('Recibido', '', '', ''),
+    ],
+  );
+}
+
+pw.TableRow _invoiceTotalTableRow(
+  String leftLabel,
+  String leftValue,
+  String rightLabel,
+  String rightValue, {
+  bool bold = false,
+}) {
+  return pw.TableRow(
+    children: [
+      _invoiceCell(
+        leftLabel,
+        bold: leftLabel.isNotEmpty,
+        align: pw.Alignment.centerLeft,
+      ),
+      _invoiceCell(leftValue),
+      _invoiceCell(
+        rightLabel,
+        bold: bold || rightLabel.isNotEmpty,
+        align: pw.Alignment.centerLeft,
+      ),
+      _invoiceCell(rightValue, bold: bold, align: pw.Alignment.centerRight),
+    ],
+  );
+}
+
+pw.Widget _invoiceCell(
+  String text, {
+  bool bold = false,
+  pw.Alignment align = pw.Alignment.center,
+}) {
+  return pw.Container(
+    height: 21,
+    alignment: align,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+    child: pw.Text(
+      text,
+      style: pw.TextStyle(fontWeight: bold ? pw.FontWeight.bold : null),
+      maxLines: 1,
+      overflow: pw.TextOverflow.clip,
+    ),
   );
 }
 
@@ -583,6 +874,15 @@ pw.Widget _optionLine(bool checked, String text) {
       ],
     ),
   );
+}
+
+String _formatMoney(double value) => 'L ${value.toStringAsFixed(2)}';
+
+String _formatQuantity(double value) {
+  if (value == value.roundToDouble()) {
+    return value.toStringAsFixed(0);
+  }
+  return value.toStringAsFixed(2);
 }
 
 double _fuelPercent(String fuelLevel) {
