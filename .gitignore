@@ -3,6 +3,9 @@
 *.sqlite
 *.sqlite3
 
+# Imagenes adjuntas a comentarios (contenido de runtime, no codigo)
+comentarios_img/
+
 # OS files
 .DS_Store
 Thumbs.db
