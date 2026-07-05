@@ -129,7 +129,6 @@ class _MainShellState extends State<MainShell> {
     _Destination('Inicio', Icons.dashboard_outlined),
     _Destination('Ordenes', Icons.assignment_outlined),
     _Destination('Orden servicio', Icons.fact_check_outlined),
-    _Destination('Clientes', Icons.qr_code_2_outlined),
     _Destination('Facturas', Icons.receipt_long_outlined),
     _Destination('Usuarios', Icons.manage_accounts_outlined),
   ];
@@ -146,7 +145,7 @@ class _MainShellState extends State<MainShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Taller Central'),
+        title: const Text('Taller PitStop'),
         actions: [
           IconButton(
             tooltip: 'Notificaciones',
@@ -216,12 +215,6 @@ class _MainShellState extends State<MainShell> {
                     });
                   },
                   onOrderUpdated: _cerrarEdicionOrden,
-                ),
-                const ModulePlaceholder(
-                  icon: Icons.qr_code_2_outlined,
-                  title: 'Vista del cliente',
-                  description:
-                      'Seguimiento publico con codigo QR o link para consultar el estado del vehiculo.',
                 ),
                 const InvoiceScreen(),
                 UserManagementScreen(refreshToken: usuariosRefreshToken),
@@ -346,16 +339,14 @@ class HeaderSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 16,
-      runSpacing: 16,
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 760;
+        final textBlock = ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 740),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 'Panel principal',
@@ -367,13 +358,35 @@ class HeaderSection extends StatelessWidget {
               ),
             ],
           ),
-        ),
-        CustomButton(
+        );
+
+        final button = CustomButton(
           label: 'Nueva orden',
           icon: Icons.add_circle_outline,
           onPressed: onCreateOrder,
-        ),
-      ],
+        );
+
+        if (!isWide) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              textBlock,
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerRight, child: button),
+            ],
+          );
+        }
+
+        return SizedBox(
+          height: 128,
+          child: Stack(
+            children: [
+              Positioned(left: 0, right: 260, bottom: 24, child: textBlock),
+              Positioned(right: 0, bottom: 12, child: button),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1744,41 +1757,6 @@ class _InvoiceLineController {
 final _decimalInputFormatter = FilteringTextInputFormatter.allow(
   RegExp(r'[0-9,.]'),
 );
-
-class ModulePlaceholder extends StatelessWidget {
-  const ModulePlaceholder({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.description,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 54, color: AppColors.steel),
-              const SizedBox(height: 16),
-              Text(title, style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: 10),
-              Text(description, textAlign: TextAlign.center),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class SectionSurface extends StatelessWidget {
   const SectionSurface({
