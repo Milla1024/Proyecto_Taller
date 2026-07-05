@@ -21,6 +21,84 @@ const int _kCalidadJpegComentario = 80;
 /// purgarOrdenesCompletadas() queda cableada pero es un no-op.
 const bool kPurgaOrdenesActiva = false;
 
+class DashboardStats {
+  const DashboardStats({
+    required this.ordenesActivas,
+    required this.ordenesHoy,
+    required this.porEntregar,
+    required this.urgentes,
+    required this.facturadoMes,
+    required this.facturasMes,
+    required this.alertasPendientes,
+    required this.enRevision,
+    required this.enProgreso,
+    required this.completadasHoy,
+    required this.canceladasMes,
+    required this.serviciosMes,
+    required this.ordenesRecientes,
+    required this.avisos,
+  });
+
+  final int ordenesActivas;
+  final int ordenesHoy;
+  final int porEntregar;
+  final int urgentes;
+  final double facturadoMes;
+  final int facturasMes;
+  final int alertasPendientes;
+  final int enRevision;
+  final int enProgreso;
+  final int completadasHoy;
+  final int canceladasMes;
+  final List<DashboardServiceStat> serviciosMes;
+  final List<DashboardOrderItem> ordenesRecientes;
+  final List<DashboardReminderItem> avisos;
+}
+
+class DashboardServiceStat {
+  const DashboardServiceStat({
+    required this.tipo,
+    required this.cantidad,
+    required this.porcentaje,
+  });
+
+  final String tipo;
+  final int cantidad;
+  final int porcentaje;
+}
+
+class DashboardOrderItem {
+  const DashboardOrderItem({
+    required this.noOrden,
+    required this.vehiculo,
+    required this.descripcion,
+    required this.estado,
+    required this.fechaIngreso,
+    this.fechaCompromiso,
+  });
+
+  final int noOrden;
+  final String vehiculo;
+  final String descripcion;
+  final String estado;
+  final String fechaIngreso;
+  final String? fechaCompromiso;
+}
+
+class DashboardReminderItem {
+  const DashboardReminderItem({
+    required this.titulo,
+    required this.subtitulo,
+    required this.tipo,
+  });
+
+  final String titulo;
+  final String subtitulo;
+  final DashboardReminderType tipo;
+}
+
+enum DashboardReminderType { danger, warning, info }
+
 class ApiService {
   ApiService._();
 
@@ -687,6 +765,143 @@ class ApiService {
       whereArgs: whereArgs.isEmpty ? null : whereArgs,
       orderBy: 'COALESCE(fecha_iso, fecha) DESC, no_factura DESC',
     );
+  }
+
+  Future<DashboardStats> obtenerDashboardStats({int? idEmpleado}) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final monthStart = DateTime(now.year, now.month);
+    final nextMonthStart = DateTime(now.year, now.month + 1);
+    final monthEnd = nextMonthStart.subtract(const Duration(days: 1));
+    final todayText = _formatDisplayDate(today);
+    final todayIso = _formatIsoDate(today);
+
+    final ordenes = await listarOrdenes(idEmpleado: idEmpleado);
+    final activas = ordenes
+        .where((orden) => _estadosActivos.contains(orden.estado))
+        .toList();
+    final enRevision = ordenes
+        .where((orden) => orden.estado == 'En revisión')
+        .length;
+    final enProgreso = ordenes
+        .where((orden) => orden.estado == 'En progreso')
+        .length;
+    final completadasHoy = ordenes.where((orden) {
+      return orden.estado == 'Completado' &&
+          (orden.fechaSalida == todayIso || orden.fechaSalida == todayText);
+    }).length;
+    final canceladasMes = ordenes.where((orden) {
+      final fecha = _parseStoredDate(orden.fechaSalida) ??
+          _parseStoredDate(orden.fechaIngreso);
+      return orden.estado == 'Cancelado' && _isInRange(fecha, monthStart, monthEnd);
+    }).length;
+    final ordenesHoy = ordenes.where((orden) {
+      final fecha = _parseStoredDate(orden.fechaIngreso);
+      return fecha != null && _isSameDay(fecha, today);
+    }).length;
+    final porEntregar = ordenes
+        .where((orden) => orden.estado == 'Completado')
+        .length;
+    final urgentes = activas.where((orden) {
+      final fecha = _parseStoredDate(orden.fechaCompromiso);
+      return fecha != null && !fecha.isAfter(today);
+    }).length;
+    final alertasPendientes = urgentes;
+
+    final facturasMes = await listarFacturas(
+      desdeIso: _formatIsoDate(monthStart),
+      hastaIso: _formatIsoDate(monthEnd),
+    );
+    final totalFacturadoMes = facturasMes.fold<double>(
+      0,
+      (total, factura) => total + ((factura['total'] as num?)?.toDouble() ?? 0),
+    );
+
+    final serviciosMes = await _obtenerServiciosDashboard(
+      monthStart: monthStart,
+      idEmpleado: idEmpleado,
+    );
+
+    final recientes = ordenes.take(5).map((orden) {
+      return DashboardOrderItem(
+        noOrden: orden.noOrden,
+        vehiculo: '${orden.vehiculoMarca} ${orden.vehiculoModelo}'.trim(),
+        descripcion: orden.descripcionFalla,
+        estado: orden.estado,
+        fechaIngreso: orden.fechaIngreso,
+        fechaCompromiso: orden.fechaCompromiso,
+      );
+    }).toList();
+
+    return DashboardStats(
+      ordenesActivas: activas.length,
+      ordenesHoy: ordenesHoy,
+      porEntregar: porEntregar,
+      urgentes: urgentes,
+      facturadoMes: totalFacturadoMes,
+      facturasMes: facturasMes.length,
+      alertasPendientes: alertasPendientes,
+      enRevision: enRevision,
+      enProgreso: enProgreso,
+      completadasHoy: completadasHoy,
+      canceladasMes: canceladasMes,
+      serviciosMes: serviciosMes,
+      ordenesRecientes: recientes,
+      avisos: _buildDashboardAvisos(activas, today),
+    );
+  }
+
+  Future<List<DashboardServiceStat>> _obtenerServiciosDashboard({
+    required DateTime monthStart,
+    int? idEmpleado,
+  }) async {
+    final db = await _db;
+    final args = <Object?>[
+      _formatDisplayDate(monthStart).substring(3, 5),
+      monthStart.year.toString(),
+    ];
+    final employeeFilter = idEmpleado == null
+        ? ''
+        : '''
+          AND EXISTS (
+            SELECT 1 FROM trabaja t
+            WHERE t.no_orden = os.no_orden AND t.id_empleado = ?
+          )
+        ''';
+    if (idEmpleado != null) {
+      args.add(idEmpleado);
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT s.tipo, COUNT(*) AS cantidad
+      FROM servicio s
+      JOIN orden_servicio os ON os.no_orden = s.no_orden
+      WHERE substr(os.fecha_ingreso, 4, 2) = ?
+        AND substr(os.fecha_ingreso, 7, 4) = ?
+        $employeeFilter
+      GROUP BY s.tipo
+      ORDER BY cantidad DESC, s.tipo ASC
+      LIMIT 5
+    ''', args);
+
+    final total = rows.fold<int>(
+      0,
+      (sum, row) => sum + ((row['cantidad'] as num?)?.toInt() ?? 0),
+    );
+    if (total == 0) {
+      return const [];
+    }
+
+    return [
+      for (final row in rows)
+        DashboardServiceStat(
+          tipo: row['tipo'] as String? ?? 'Sin tipo',
+          cantidad: (row['cantidad'] as num?)?.toInt() ?? 0,
+          porcentaje:
+              ((((row['cantidad'] as num?)?.toDouble() ?? 0) / total) * 100)
+                  .round(),
+        ),
+    ];
   }
 
   /// Si [idEmpleado] se especifica, solo devuelve las ordenes donde ese
@@ -1472,4 +1687,100 @@ class ApiService {
             : '123456',
     };
   }
+}
+
+const _estadosActivos = {'En revisión', 'En progreso'};
+
+List<DashboardReminderItem> _buildDashboardAvisos(
+  List<OrdenServicio> activas,
+  DateTime today,
+) {
+  final avisos = <DashboardReminderItem>[];
+  for (final orden in activas) {
+    final compromiso = _parseStoredDate(orden.fechaCompromiso);
+    if (compromiso == null) {
+      continue;
+    }
+    final vehiculo = '${orden.vehiculoMarca} ${orden.vehiculoModelo}'.trim();
+    if (compromiso.isBefore(today)) {
+      avisos.add(
+        DashboardReminderItem(
+          titulo: 'OT-${orden.noOrden} vencida',
+          subtitulo: '$vehiculo debia entregarse el ${orden.fechaCompromiso}',
+          tipo: DashboardReminderType.danger,
+        ),
+      );
+    } else if (_isSameDay(compromiso, today)) {
+      avisos.add(
+        DashboardReminderItem(
+          titulo: 'OT-${orden.noOrden} vence hoy',
+          subtitulo: '$vehiculo esta en estado ${orden.estado}',
+          tipo: DashboardReminderType.warning,
+        ),
+      );
+    }
+  }
+
+  if (avisos.isEmpty) {
+    return const [
+      DashboardReminderItem(
+        titulo: 'Sin entregas vencidas',
+        subtitulo: 'Las ordenes activas estan dentro de su fecha compromiso.',
+        tipo: DashboardReminderType.info,
+      ),
+    ];
+  }
+  return avisos.take(4).toList();
+}
+
+DateTime? _parseStoredDate(String? value) {
+  final text = value?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+
+  final isoParts = text.split('-');
+  if (isoParts.length == 3) {
+    final year = int.tryParse(isoParts[0]);
+    final month = int.tryParse(isoParts[1]);
+    final day = int.tryParse(isoParts[2]);
+    if (year != null && month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+
+  final displayParts = text.split('/');
+  if (displayParts.length == 3) {
+    final day = int.tryParse(displayParts[0]);
+    final month = int.tryParse(displayParts[1]);
+    final year = int.tryParse(displayParts[2]);
+    if (year != null && month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+
+  return DateTime.tryParse(text);
+}
+
+bool _isSameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+bool _isInRange(DateTime? value, DateTime start, DateTime end) {
+  if (value == null) {
+    return false;
+  }
+  return !value.isBefore(start) && !value.isAfter(end);
+}
+
+String _formatDisplayDate(DateTime date) {
+  final day = date.day.toString().padLeft(2, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  return '$day/$month/${date.year}';
+}
+
+String _formatIsoDate(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
 }

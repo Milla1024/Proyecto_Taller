@@ -42,8 +42,7 @@ class CorreoService {
   int get _smtpPort => int.tryParse(dotenv.env['SMTP_PORT'] ?? '') ?? 587;
   String get _smtpUsuario => dotenv.env['SMTP_USUARIO'] ?? '';
   String get _smtpPassword => dotenv.env['SMTP_PASSWORD'] ?? '';
-  String get _nombreRemitente =>
-      dotenv.env['SMTP_NOMBRE_REMITENTE'] ?? 'Taller';
+  String get _nombreRemitente => dotenv.env['SMTP_NOMBRE_REMITENTE'] ?? 'Taller';
   String get _tallerNombre => dotenv.env['TALLER_NOMBRE'] ?? 'Taller';
   String get _tallerTelefono => dotenv.env['TALLER_TELEFONO'] ?? '';
   String get _tallerHorario => dotenv.env['TALLER_HORARIO'] ?? '';

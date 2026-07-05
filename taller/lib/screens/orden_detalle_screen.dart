@@ -685,7 +685,7 @@ class _ComentariosDetalleSectionState
   }
 
   Future<void> _seleccionarImagenes() async {
-    final resultado = await FilePicker.platform.pickFiles(
+    final resultado = await FilePicker.pickFiles(
       allowMultiple: true,
       type: FileType.custom,
       allowedExtensions: const ['png', 'jpg', 'jpeg'],
@@ -693,7 +693,7 @@ class _ComentariosDetalleSectionState
     if (resultado == null) {
       return;
     }
-    final rutas = [
+    final rutas = <String>[
       for (final archivo in resultado.files)
         if (archivo.path != null) archivo.path!,
     ];

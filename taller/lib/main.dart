@@ -17,7 +17,7 @@ class TallerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Taller Central',
+      title: 'Taller PitStop',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.teal,
