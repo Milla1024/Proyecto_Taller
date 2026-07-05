@@ -1,12 +1,20 @@
 import 'dart:io';
+import 'dart:math';
 
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../models/comentario_orden.dart';
+import '../models/imagen_comentario.dart';
 import '../models/orden_detalle.dart';
 import '../models/orden_servicio.dart';
 import '../models/notificacion_usuario.dart';
 import '../models/usuario.dart';
+import 'correo_service.dart';
+
+const int _kAnchoMaximoImagenComentario = 1600;
+const int _kCalidadJpegComentario = 80;
 
 /// Activar SOLO cuando el modulo de facturas persista la transaccion antes
 /// de perder acceso a la orden de origen. Mientras este en false,
@@ -61,6 +69,8 @@ class ApiService {
     await _prepareServiceOrderTables(db);
     await _prepareFacturaTables(db);
     await _prepareNotificacionUsuarioTable(db);
+    await _prepareComentarioOrdenTable(db);
+    await _prepareComentarioImagenTable(db);
     await _purgarOrdenesCompletadas(db);
   }
 
@@ -333,6 +343,54 @@ class ApiService {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_notificacion_usuario_empleado_leida
       ON notificacion_usuario(id_empleado, leida, fecha_creacion)
+    ''');
+  }
+
+  /// La apertura de la base no usa el mecanismo de version/onUpgrade de
+  /// sqflite (ver openDatabase en _db): todas las tablas se crean de forma
+  /// idempotente aqui mismo, asi que las instalaciones existentes ganan esta
+  /// tabla la proxima vez que abran la app, sin perder datos.
+  Future<void> _prepareComentarioOrdenTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS comentario_orden (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        no_orden INTEGER NOT NULL,
+        id_empleado INTEGER NOT NULL,
+        comentario TEXT NOT NULL,
+        fecha_hora TEXT NOT NULL,
+        visible_cliente INTEGER NOT NULL DEFAULT 1,
+        enviado INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
+          ON DELETE CASCADE,
+        FOREIGN KEY (id_empleado) REFERENCES empleado(id)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_comentario_orden_no_orden
+      ON comentario_orden(no_orden, fecha_hora)
+    ''');
+  }
+
+  /// Mismo patron idempotente que _prepareComentarioOrdenTable: no hay
+  /// version/onUpgrade de sqflite en este proyecto, asi que las
+  /// instalaciones existentes ganan esta tabla en su proxima apertura.
+  Future<void> _prepareComentarioImagenTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS comentario_imagen (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_comentario INTEGER NOT NULL,
+        ruta TEXT NOT NULL,
+        fecha_hora TEXT NOT NULL,
+        FOREIGN KEY (id_comentario) REFERENCES comentario_orden(id)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_comentario_imagen_id_comentario
+      ON comentario_imagen(id_comentario)
     ''');
   }
 
@@ -750,6 +808,7 @@ class ApiService {
 
   Future<void> aceptarOrden(int noOrden) async {
     final db = await _db;
+    var cambioAplicado = false;
     await db.transaction((txn) async {
       final updated = await txn.update(
         'orden_servicio',
@@ -758,6 +817,7 @@ class ApiService {
         whereArgs: [noOrden, 'En revisión'],
       );
       if (updated > 0) {
+        cambioAplicado = true;
         await _registrarCambioEstadoOrden(
           txn,
           noOrden: noOrden,
@@ -766,6 +826,9 @@ class ApiService {
         );
       }
     });
+    if (cambioAplicado) {
+      await _notificarCambioEstadoPorCorreo(noOrden, 'En progreso');
+    }
   }
 
   Future<void> cancelarOrden(int noOrden) async {
@@ -792,6 +855,7 @@ class ApiService {
   /// arranca el reloj de retencion para purgarOrdenesCompletadas().
   Future<void> completarOrden(int noOrden, String fechaSalidaIso) async {
     final db = await _db;
+    var cambioAplicado = false;
     await db.transaction((txn) async {
       final updated = await txn.update(
         'orden_servicio',
@@ -800,6 +864,7 @@ class ApiService {
         whereArgs: [noOrden, 'En progreso'],
       );
       if (updated > 0) {
+        cambioAplicado = true;
         await _registrarCambioEstadoOrden(
           txn,
           noOrden: noOrden,
@@ -808,6 +873,32 @@ class ApiService {
         );
       }
     });
+    if (cambioAplicado) {
+      await _notificarCambioEstadoPorCorreo(noOrden, 'Completado');
+    }
+  }
+
+  /// Envia la notificacion de cambio de estado por correo. Se llama despues
+  /// de que la transicion ya quedo persistida: un fallo aqui (SMTP caido,
+  /// sin correo del cliente, etc.) solo se registra en consola y jamas
+  /// revierte ni bloquea la transicion de estado.
+  Future<void> _notificarCambioEstadoPorCorreo(
+    int noOrden,
+    String estadoNuevo,
+  ) async {
+    try {
+      final orden = await obtenerOrdenCompleta(noOrden);
+      if (orden == null) {
+        return;
+      }
+      await CorreoService.instance.enviarNotificacionEstado(
+        orden,
+        estadoNuevo,
+      );
+    } catch (error) {
+      // ignore: avoid_print
+      print('No se pudo enviar la notificacion de estado de OT-$noOrden: $error');
+    }
   }
 
   Future<void> _registrarCambioEstadoOrden(
@@ -1153,6 +1244,216 @@ class ApiService {
           'rol': entry.value,
         });
       }
+    });
+  }
+
+  static final Random _randomImagenComentario = Random();
+
+  /// Carpeta destino para las imagenes de una orden, junto al archivo de la
+  /// base de datos (no dentro de la base): `<dir_base>/comentarios_img/<no_orden>`.
+  String _directorioImagenesComentario(String dirBase, int noOrden) {
+    return p.join(dirBase, 'comentarios_img', noOrden.toString());
+  }
+
+  /// Copia [rutaOrigen] a [directorioDestino] comprimida como JPEG (ancho
+  /// maximo _kAnchoMaximoImagenComentario, calidad _kCalidadJpegComentario)
+  /// y devuelve la ruta RELATIVA a [dirBase] para guardar en la base.
+  Future<String> _copiarYComprimirImagenComentario({
+    required String rutaOrigen,
+    required String directorioDestino,
+    required String dirBase,
+    required int noOrden,
+  }) async {
+    final bytesOriginales = await File(rutaOrigen).readAsBytes();
+    final imagenDecodificada = img.decodeImage(bytesOriginales);
+    if (imagenDecodificada == null) {
+      throw FormatException('No se pudo leer la imagen: $rutaOrigen');
+    }
+
+    final imagenFinal = imagenDecodificada.width > _kAnchoMaximoImagenComentario
+        ? img.copyResize(
+            imagenDecodificada,
+            width: _kAnchoMaximoImagenComentario,
+          )
+        : imagenDecodificada;
+    final bytesJpg = img.encodeJpg(imagenFinal, quality: _kCalidadJpegComentario);
+
+    final nombreUnico =
+        '${DateTime.now().millisecondsSinceEpoch}_'
+        '${_randomImagenComentario.nextInt(999999).toString().padLeft(6, '0')}'
+        '.jpg';
+    await Directory(directorioDestino).create(recursive: true);
+    await File(p.join(directorioDestino, nombreUnico)).writeAsBytes(bytesJpg);
+
+    return p.join('comentarios_img', noOrden.toString(), nombreUnico);
+  }
+
+  Future<int> guardarComentario({
+    required int noOrden,
+    required int idEmpleado,
+    required String comentario,
+    required bool visibleCliente,
+    List<String> rutasImagenes = const [],
+  }) async {
+    final db = await _db;
+    final dirBase = p.dirname(db.path);
+    final directorioDestino = _directorioImagenesComentario(dirBase, noOrden);
+
+    final rutasRelativasGuardadas = <String>[];
+    try {
+      for (final rutaOrigen in rutasImagenes) {
+        final rutaRelativa = await _copiarYComprimirImagenComentario(
+          rutaOrigen: rutaOrigen,
+          directorioDestino: directorioDestino,
+          dirBase: dirBase,
+          noOrden: noOrden,
+        );
+        rutasRelativasGuardadas.add(rutaRelativa);
+      }
+
+      return await db.transaction<int>((txn) async {
+        final fechaHora = DateTime.now().toIso8601String();
+        final idComentario = await txn.insert('comentario_orden', {
+          'no_orden': noOrden,
+          'id_empleado': idEmpleado,
+          'comentario': comentario.trim(),
+          'fecha_hora': fechaHora,
+          'visible_cliente': visibleCliente ? 1 : 0,
+          'enviado': 0,
+        });
+
+        for (final rutaRelativa in rutasRelativasGuardadas) {
+          await txn.insert('comentario_imagen', {
+            'id_comentario': idComentario,
+            'ruta': rutaRelativa,
+            'fecha_hora': fechaHora,
+          });
+        }
+
+        return idComentario;
+      });
+    } catch (error) {
+      for (final rutaRelativa in rutasRelativasGuardadas) {
+        final archivo = File(p.join(dirBase, rutaRelativa));
+        if (archivo.existsSync()) {
+          archivo.deleteSync();
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<int, List<ImagenComentario>>> _obtenerImagenesPorComentario(
+    Database db,
+    List<int> idsComentario,
+    String dirBase,
+  ) async {
+    if (idsComentario.isEmpty) {
+      return {};
+    }
+    final placeholders = List.filled(idsComentario.length, '?').join(', ');
+    final rows = await db.query(
+      'comentario_imagen',
+      where: 'id_comentario IN ($placeholders)',
+      whereArgs: idsComentario,
+      orderBy: 'datetime(fecha_hora) ASC, id ASC',
+    );
+
+    final resultado = <int, List<ImagenComentario>>{};
+    for (final row in rows) {
+      final imagen = ImagenComentario.fromMap(row, dirBase: dirBase);
+      resultado.putIfAbsent(imagen.idComentario, () => []).add(imagen);
+    }
+    return resultado;
+  }
+
+  Future<List<ComentarioOrden>> obtenerComentarios(int noOrden) async {
+    final db = await _db;
+    final dirBase = p.dirname(db.path);
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        c.id,
+        c.no_orden,
+        c.id_empleado,
+        c.comentario,
+        c.fecha_hora,
+        c.visible_cliente,
+        c.enviado,
+        e.nombre AS nombre_empleado,
+        e.puesto AS rol_empleado
+      FROM comentario_orden c
+      JOIN empleado e ON e.id = c.id_empleado
+      WHERE c.no_orden = ?
+      ORDER BY datetime(c.fecha_hora) ASC, c.id ASC
+    ''',
+      [noOrden],
+    );
+    final imagenesPorComentario = await _obtenerImagenesPorComentario(
+      db,
+      [for (final row in rows) row['id'] as int],
+      dirBase,
+    );
+    return [
+      for (final row in rows)
+        ComentarioOrden.fromMap(
+          row,
+          imagenes: imagenesPorComentario[row['id'] as int] ?? const [],
+        ),
+    ];
+  }
+
+  Future<List<ComentarioOrden>> obtenerComentariosVisiblesNoEnviados(
+    int noOrden,
+  ) async {
+    final db = await _db;
+    final dirBase = p.dirname(db.path);
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        c.id,
+        c.no_orden,
+        c.id_empleado,
+        c.comentario,
+        c.fecha_hora,
+        c.visible_cliente,
+        c.enviado,
+        e.nombre AS nombre_empleado,
+        e.puesto AS rol_empleado
+      FROM comentario_orden c
+      JOIN empleado e ON e.id = c.id_empleado
+      WHERE c.no_orden = ? AND c.visible_cliente = 1 AND c.enviado = 0
+      ORDER BY datetime(c.fecha_hora) ASC, c.id ASC
+    ''',
+      [noOrden],
+    );
+    final imagenesPorComentario = await _obtenerImagenesPorComentario(
+      db,
+      [for (final row in rows) row['id'] as int],
+      dirBase,
+    );
+    return [
+      for (final row in rows)
+        ComentarioOrden.fromMap(
+          row,
+          imagenes: imagenesPorComentario[row['id'] as int] ?? const [],
+        ),
+    ];
+  }
+
+  Future<void> marcarComentariosEnviados(List<int> ids) async {
+    if (ids.isEmpty) {
+      return;
+    }
+    final db = await _db;
+    await db.transaction((txn) async {
+      final placeholders = List.filled(ids.length, '?').join(', ');
+      await txn.update(
+        'comentario_orden',
+        {'enviado': 1},
+        where: 'id IN ($placeholders)',
+        whereArgs: ids,
+      );
     });
   }
 

@@ -1,10 +1,16 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../models/comentario_orden.dart';
 import '../models/estado_orden.dart';
+import '../models/imagen_comentario.dart';
 import '../models/orden_detalle.dart';
 import '../models/urgencia.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
+import '../services/correo_service.dart';
 import '../services/print_service.dart';
 import 'home_screen.dart';
 import 'ordenes_screen.dart';
@@ -265,6 +271,12 @@ class _OrdenDetalleScreenState extends State<OrdenDetalleScreen> {
                   const SizedBox(height: 16),
                   TotalesDetalleSection(detalle: detalle),
                 ],
+                const SizedBox(height: 16),
+                ComentariosDetalleSection(
+                  noOrden: detalle.noOrden,
+                  currentUser: widget.currentUser,
+                  tieneCorreoCliente: detalle.clienteCorreos.isNotEmpty,
+                ),
                 const SizedBox(height: 20),
                 AccionesEstadoBar(
                   estado: EstadoOrden.fromDb(detalle.estado),
@@ -616,6 +628,455 @@ class _TotalRow extends StatelessWidget {
       ),
     );
   }
+}
+
+bool _puedeComentar(String rol) {
+  return rol == 'Administrador' || rol == 'Mecánico';
+}
+
+class ComentariosDetalleSection extends StatefulWidget {
+  const ComentariosDetalleSection({
+    super.key,
+    required this.noOrden,
+    required this.currentUser,
+    required this.tieneCorreoCliente,
+  });
+
+  final int noOrden;
+  final Usuario? currentUser;
+  final bool tieneCorreoCliente;
+
+  @override
+  State<ComentariosDetalleSection> createState() =>
+      _ComentariosDetalleSectionState();
+}
+
+class _ComentariosDetalleSectionState
+    extends State<ComentariosDetalleSection> {
+  late Future<List<ComentarioOrden>> _future;
+  final _controller = TextEditingController();
+  final List<String> _imagenesPendientes = [];
+  bool _visibleCliente = true;
+  bool _guardando = false;
+  bool _enviando = false;
+
+  bool get _puede => _puedeComentar(widget.currentUser?.rol ?? '');
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _cargar();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<List<ComentarioOrden>> _cargar() {
+    return ApiService.instance.obtenerComentarios(widget.noOrden);
+  }
+
+  void _recargar() {
+    setState(() {
+      _future = _cargar();
+    });
+  }
+
+  Future<void> _seleccionarImagenes() async {
+    final resultado = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg'],
+    );
+    if (resultado == null) {
+      return;
+    }
+    final rutas = [
+      for (final archivo in resultado.files)
+        if (archivo.path != null) archivo.path!,
+    ];
+    if (rutas.isEmpty) {
+      return;
+    }
+    setState(() => _imagenesPendientes.addAll(rutas));
+  }
+
+  void _quitarPendiente(int index) {
+    setState(() => _imagenesPendientes.removeAt(index));
+  }
+
+  Future<void> _agregar() async {
+    final texto = _controller.text.trim();
+    final usuario = widget.currentUser;
+    if (texto.isEmpty || usuario == null) {
+      return;
+    }
+    setState(() => _guardando = true);
+    try {
+      await ApiService.instance.guardarComentario(
+        noOrden: widget.noOrden,
+        idEmpleado: usuario.id,
+        comentario: texto,
+        visibleCliente: _visibleCliente,
+        rutasImagenes: _imagenesPendientes,
+      );
+      _controller.clear();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _guardando = false;
+        _imagenesPendientes.clear();
+      });
+      _recargar();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _guardando = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo guardar el comentario')),
+      );
+    }
+  }
+
+  Future<void> _enviarAlCliente() async {
+    final pendientes = await ApiService.instance
+        .obtenerComentariosVisiblesNoEnviados(widget.noOrden);
+    if (pendientes.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay comentarios nuevos para enviar'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _enviando = true);
+    final orden = await ApiService.instance.obtenerOrdenCompleta(
+      widget.noOrden,
+    );
+    final estado = orden == null
+        ? EstadoEnvioCorreo.fallo
+        : await CorreoService.instance.enviarActualizacion(orden, pendientes);
+    if (estado == EstadoEnvioCorreo.exito) {
+      await ApiService.instance.marcarComentariosEnviados([
+        for (final comentario in pendientes) comentario.id,
+      ]);
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() => _enviando = false);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_mensajeEnvio(estado))));
+    _recargar();
+  }
+
+  String _mensajeEnvio(EstadoEnvioCorreo estado) {
+    switch (estado) {
+      case EstadoEnvioCorreo.exito:
+        return 'Comentarios enviados al cliente';
+      case EstadoEnvioCorreo.excedeTamano:
+        return 'Las imágenes superan el límite de tamaño del correo';
+      case EstadoEnvioCorreo.fallo:
+        return 'No se pudo enviar el correo al cliente';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FormSection(
+      title: 'Comentarios',
+      icon: Icons.forum_outlined,
+      child: FutureBuilder<List<ComentarioOrden>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snapshot.hasError) {
+            return Text(
+              'No se pudieron cargar los comentarios: ${snapshot.error}',
+            );
+          }
+
+          final comentarios = snapshot.data ?? [];
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (comentarios.isEmpty)
+                const Text('Aún no hay comentarios.')
+              else
+                for (final comentario in comentarios) ...[
+                  ComentarioTile(comentario: comentario),
+                  const SizedBox(height: 14),
+                ],
+              if (_puede) ...[
+                const Divider(color: AppColors.border),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _controller,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    hintText: 'Escribe un comentario...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.steel,
+                        side: const BorderSide(color: AppColors.border),
+                      ),
+                      onPressed: _seleccionarImagenes,
+                      icon: const Icon(Icons.attach_file_outlined),
+                      label: const Text('Adjuntar imagen'),
+                    ),
+                    for (var i = 0; i < _imagenesPendientes.length; i++)
+                      _ImagenPendienteThumb(
+                        ruta: _imagenesPendientes[i],
+                        onQuitar: () => _quitarPendiente(i),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _visibleCliente,
+                      activeColor: AppColors.teal,
+                      onChanged: (value) =>
+                          setState(() => _visibleCliente = value ?? true),
+                    ),
+                    const Text('Visible al cliente'),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.teal,
+                      ),
+                      onPressed: _guardando ? null : _agregar,
+                      icon: const Icon(Icons.add_comment_outlined),
+                      label: const Text('Agregar'),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.teal,
+                        side: const BorderSide(color: AppColors.teal),
+                      ),
+                      onPressed: (!widget.tieneCorreoCliente || _enviando)
+                          ? null
+                          : _enviarAlCliente,
+                      icon: const Icon(Icons.email_outlined),
+                      label: Text(
+                        widget.tieneCorreoCliente
+                            ? 'Enviar al cliente'
+                            : 'El cliente no tiene correo registrado',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ImagenPendienteThumb extends StatelessWidget {
+  const _ImagenPendienteThumb({required this.ruta, required this.onQuitar});
+
+  final String ruta;
+  final VoidCallback onQuitar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: Image.file(
+            File(ruta),
+            width: 56,
+            height: 56,
+            fit: BoxFit.cover,
+          ),
+        ),
+        Positioned(
+          top: -6,
+          right: -6,
+          child: GestureDetector(
+            onTap: onQuitar,
+            child: const CircleAvatar(
+              radius: 10,
+              backgroundColor: AppColors.coral,
+              child: Icon(Icons.close, size: 14, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+void _mostrarImagenCompleta(BuildContext context, ImagenComentario imagen) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.black,
+      insetPadding: const EdgeInsets.all(24),
+      child: Stack(
+        children: [
+          InteractiveViewer(child: Image.file(File(imagen.rutaAbsoluta))),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class ComentarioTile extends StatelessWidget {
+  const ComentarioTile({super.key, required this.comentario});
+
+  final ComentarioOrden comentario;
+
+  String get _iniciales {
+    final nombre = (comentario.nombreEmpleado ?? '').trim();
+    if (nombre.isEmpty) {
+      return '?';
+    }
+    final partes = nombre.split(RegExp(r'\s+'));
+    final buffer = StringBuffer();
+    for (final parte in partes.take(2)) {
+      if (parte.isNotEmpty) {
+        buffer.write(parte[0]);
+      }
+    }
+    return buffer.toString().toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          backgroundColor: AppColors.tealSoft,
+          child: Text(
+            _iniciales,
+            style: const TextStyle(
+              color: AppColors.teal,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    '${comentario.nombreEmpleado ?? "Empleado"} · '
+                    '${comentario.rolEmpleado ?? ""}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(
+                    _formatearFechaHora(comentario.fechaHora),
+                    style: const TextStyle(
+                      color: AppColors.slate,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(comentario.comentario),
+              const SizedBox(height: 6),
+              PriorityChip(
+                label: comentario.visibleCliente
+                    ? 'Visible al cliente'
+                    : 'Nota interna',
+                color: comentario.visibleCliente
+                    ? AppColors.teal
+                    : AppColors.steel,
+              ),
+              if (comentario.imagenes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final imagen in comentario.imagenes)
+                      GestureDetector(
+                        onTap: () => _mostrarImagenCompleta(context, imagen),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(
+                            File(imagen.rutaAbsoluta),
+                            width: 56,
+                            height: 56,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _formatearFechaHora(String iso) {
+  final fecha = DateTime.tryParse(iso);
+  if (fecha == null) {
+    return iso;
+  }
+  final dia = fecha.day.toString().padLeft(2, '0');
+  final mes = fecha.month.toString().padLeft(2, '0');
+  final hora = fecha.hour.toString().padLeft(2, '0');
+  final minuto = fecha.minute.toString().padLeft(2, '0');
+  return '$dia/$mes/${fecha.year} $hora:$minuto';
 }
 
 class AccionesEstadoBar extends StatelessWidget {
