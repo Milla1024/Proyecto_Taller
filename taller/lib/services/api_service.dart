@@ -59,6 +59,7 @@ class ApiService {
     await db.execute('PRAGMA foreign_keys = ON');
     await _prepareEmpleadoTable(db);
     await _prepareServiceOrderTables(db);
+    await _prepareFacturaTables(db);
     await _prepareNotificacionUsuarioTable(db);
     await _purgarOrdenesCompletadas(db);
   }
@@ -335,6 +336,62 @@ class ApiService {
     ''');
   }
 
+  Future<void> _prepareFacturaTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS factura (
+        no_factura INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente_nombre TEXT NOT NULL,
+        cliente_documento TEXT,
+        cliente_telefono TEXT,
+        cliente_direccion TEXT,
+        fecha TEXT NOT NULL,
+        fecha_iso TEXT,
+        subtotal REAL DEFAULT 0,
+        descuento_porcentaje REAL DEFAULT 0,
+        descuento REAL DEFAULT 0,
+        impuesto_porcentaje REAL DEFAULT 0,
+        impuesto REAL DEFAULT 0,
+        total REAL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS factura_linea (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        no_factura INTEGER NOT NULL,
+        producto TEXT NOT NULL,
+        cantidad REAL NOT NULL,
+        precio_unitario REAL NOT NULL,
+        total REAL NOT NULL,
+        FOREIGN KEY (no_factura) REFERENCES factura(no_factura)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    final facturaColumns = await db.rawQuery('PRAGMA table_info(factura)');
+    final facturaColumnNames = facturaColumns
+        .map((column) => column['name'] as String)
+        .toSet();
+    if (!facturaColumnNames.contains('descuento_porcentaje')) {
+      await db.execute(
+        'ALTER TABLE factura ADD COLUMN descuento_porcentaje REAL DEFAULT 0',
+      );
+    }
+    if (!facturaColumnNames.contains('impuesto_porcentaje')) {
+      await db.execute(
+        'ALTER TABLE factura ADD COLUMN impuesto_porcentaje REAL DEFAULT 0',
+      );
+    }
+    if (!facturaColumnNames.contains('fecha_iso')) {
+      await db.execute('ALTER TABLE factura ADD COLUMN fecha_iso TEXT');
+    }
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_factura_fecha_iso
+      ON factura(fecha_iso)
+    ''');
+  }
+
   /// SQLite no permite ALTER de un CHECK existente: si la tabla todavia tiene
   /// el CHECK viejo ('En Proceso', 'Finalizado', 'Cancelado'), la reconstruye
   /// con el CHECK nuevo, mapeando los valores de estado y preservando el
@@ -460,6 +517,28 @@ class ApiService {
     return (maxId > sequenceId ? maxId : sequenceId) + 1;
   }
 
+  Future<int> obtenerSiguienteNoFactura() async {
+    final db = await _db;
+    final maxRows = await db.rawQuery(
+      'SELECT COALESCE(MAX(no_factura), 0) AS max_id FROM factura',
+    );
+    final maxId = maxRows.first['max_id'] as int;
+
+    var sequenceId = 0;
+    try {
+      final sequenceRows = await db.rawQuery(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'factura'",
+      );
+      if (sequenceRows.isNotEmpty) {
+        sequenceId = sequenceRows.first['seq'] as int;
+      }
+    } catch (_) {
+      sequenceId = 0;
+    }
+
+    return (maxId > sequenceId ? maxId : sequenceId) + 1;
+  }
+
   Future<Usuario> crearUsuario(Usuario usuario) async {
     final db = await _db;
     final id = await db.insert('empleado', _toEmpleadoMap(usuario));
@@ -479,6 +558,77 @@ class ApiService {
   Future<void> eliminarUsuario(int id) async {
     final db = await _db;
     await db.delete('empleado', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> guardarFactura({
+    required String clienteNombre,
+    required String clienteDocumento,
+    required String clienteTelefono,
+    required String clienteDireccion,
+    required String fecha,
+    required String fechaIso,
+    required double subtotal,
+    required double descuentoPorcentaje,
+    required double descuento,
+    required double impuestoPorcentaje,
+    required double impuesto,
+    required double total,
+    required List<Map<String, Object?>> lineas,
+  }) async {
+    final db = await _db;
+    return db.transaction<int>((txn) async {
+      final facturaId = await txn.insert('factura', {
+        'cliente_nombre': clienteNombre.trim(),
+        'cliente_documento': clienteDocumento.trim(),
+        'cliente_telefono': clienteTelefono.trim(),
+        'cliente_direccion': clienteDireccion.trim(),
+        'fecha': fecha.trim(),
+        'fecha_iso': fechaIso.trim(),
+        'subtotal': subtotal,
+        'descuento_porcentaje': descuentoPorcentaje,
+        'descuento': descuento,
+        'impuesto_porcentaje': impuestoPorcentaje,
+        'impuesto': impuesto,
+        'total': total,
+      });
+
+      for (final linea in lineas) {
+        await txn.insert('factura_linea', {
+          'no_factura': facturaId,
+          'producto': linea['producto'],
+          'cantidad': linea['cantidad'],
+          'precio_unitario': linea['precio_unitario'],
+          'total': linea['total'],
+        });
+      }
+
+      return facturaId;
+    });
+  }
+
+  Future<List<Map<String, Object?>>> listarFacturas({
+    String? desdeIso,
+    String? hastaIso,
+  }) async {
+    final db = await _db;
+    final whereParts = <String>[];
+    final whereArgs = <Object?>[];
+
+    if (desdeIso != null && desdeIso.trim().isNotEmpty) {
+      whereParts.add('fecha_iso >= ?');
+      whereArgs.add(desdeIso.trim());
+    }
+    if (hastaIso != null && hastaIso.trim().isNotEmpty) {
+      whereParts.add('fecha_iso <= ?');
+      whereArgs.add(hastaIso.trim());
+    }
+
+    return db.query(
+      'factura',
+      where: whereParts.isEmpty ? null : whereParts.join(' AND '),
+      whereArgs: whereArgs.isEmpty ? null : whereArgs,
+      orderBy: 'COALESCE(fecha_iso, fecha) DESC, no_factura DESC',
+    );
   }
 
   /// Si [idEmpleado] se especifica, solo devuelve las ordenes donde ese

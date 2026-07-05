@@ -2,6 +2,8 @@ PRAGMA foreign_keys = ON;
 
 DROP TABLE IF EXISTS trabaja;
 DROP TABLE IF EXISTS notificacion_usuario;
+DROP TABLE IF EXISTS factura_linea;
+DROP TABLE IF EXISTS factura;
 DROP TABLE IF EXISTS servicio;
 DROP TABLE IF EXISTS orden_accesorios;
 DROP TABLE IF EXISTS cliente_telefono;
@@ -103,6 +105,36 @@ CREATE TABLE servicio (
     FOREIGN KEY (no_orden) REFERENCES orden_servicio(no_orden)
         ON DELETE CASCADE
 );
+
+CREATE TABLE factura (
+    no_factura INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_nombre TEXT NOT NULL,
+    cliente_documento TEXT,
+    cliente_telefono TEXT,
+    cliente_direccion TEXT,
+    fecha TEXT NOT NULL,
+    fecha_iso TEXT,
+    subtotal REAL DEFAULT 0,
+    descuento_porcentaje REAL DEFAULT 0,
+    descuento REAL DEFAULT 0,
+    impuesto_porcentaje REAL DEFAULT 0,
+    impuesto REAL DEFAULT 0,
+    total REAL DEFAULT 0
+);
+
+CREATE TABLE factura_linea (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    no_factura INTEGER NOT NULL,
+    producto TEXT NOT NULL,
+    cantidad REAL NOT NULL,
+    precio_unitario REAL NOT NULL,
+    total REAL NOT NULL,
+    FOREIGN KEY (no_factura) REFERENCES factura(no_factura)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX idx_factura_fecha_iso
+ON factura(fecha_iso);
 
 CREATE TABLE notificacion_usuario (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
