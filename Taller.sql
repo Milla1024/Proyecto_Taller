@@ -2,6 +2,8 @@ PRAGMA foreign_keys = ON;
 
 DROP TABLE IF EXISTS trabaja;
 DROP TABLE IF EXISTS notificacion_usuario;
+DROP TABLE IF EXISTS cotizacion_linea;
+DROP TABLE IF EXISTS cotizacion;
 DROP TABLE IF EXISTS factura_linea;
 DROP TABLE IF EXISTS factura;
 DROP TABLE IF EXISTS servicio;
@@ -135,6 +137,46 @@ CREATE TABLE factura_linea (
 
 CREATE INDEX idx_factura_fecha_iso
 ON factura(fecha_iso);
+
+CREATE TABLE cotizacion (
+    no_cotizacion INTEGER PRIMARY KEY AUTOINCREMENT,
+    proveedor_empresa TEXT NOT NULL,
+    proveedor_rtn TEXT,
+    proveedor_telefono TEXT,
+    proveedor_correo TEXT,
+    proveedor_direccion TEXT,
+    proveedor_atiende TEXT,
+    cliente_nombre TEXT NOT NULL,
+    cliente_atencion TEXT,
+    vehiculo TEXT,
+    placa TEXT,
+    vin TEXT,
+    kilometraje TEXT,
+    fecha_emision TEXT NOT NULL,
+    fecha_iso TEXT,
+    subtotal REAL DEFAULT 0,
+    impuesto_porcentaje REAL DEFAULT 0,
+    impuesto REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    terminos TEXT
+);
+
+CREATE TABLE cotizacion_linea (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    no_cotizacion INTEGER NOT NULL,
+    cantidad REAL NOT NULL,
+    descripcion TEXT NOT NULL,
+    precio_unitario REAL NOT NULL,
+    total REAL NOT NULL,
+    FOREIGN KEY (no_cotizacion) REFERENCES cotizacion(no_cotizacion)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX idx_cotizacion_cliente_nombre
+ON cotizacion(cliente_nombre);
+
+CREATE INDEX idx_cotizacion_fecha_iso
+ON cotizacion(fecha_iso);
 
 CREATE TABLE notificacion_usuario (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

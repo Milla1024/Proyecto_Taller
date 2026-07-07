@@ -99,6 +99,66 @@ class InvoicePrintData {
   final double total;
 }
 
+class QuotePrintLine {
+  const QuotePrintLine({
+    required this.quantity,
+    required this.description,
+    required this.unitPrice,
+    required this.total,
+  });
+
+  final double quantity;
+  final String description;
+  final double unitPrice;
+  final double total;
+}
+
+class QuotePrintData {
+  const QuotePrintData({
+    required this.quoteNumber,
+    required this.issueDate,
+    required this.providerCompany,
+    required this.providerRtn,
+    required this.providerPhone,
+    required this.providerEmail,
+    required this.providerAddress,
+    required this.providerAttends,
+    required this.customerName,
+    required this.customerAttention,
+    required this.vehicle,
+    required this.plate,
+    required this.vin,
+    required this.mileage,
+    required this.lines,
+    required this.subtotal,
+    required this.taxPercent,
+    required this.tax,
+    required this.total,
+    required this.terms,
+  });
+
+  final String quoteNumber;
+  final String issueDate;
+  final String providerCompany;
+  final String providerRtn;
+  final String providerPhone;
+  final String providerEmail;
+  final String providerAddress;
+  final String providerAttends;
+  final String customerName;
+  final String customerAttention;
+  final String vehicle;
+  final String plate;
+  final String vin;
+  final String mileage;
+  final List<QuotePrintLine> lines;
+  final double subtotal;
+  final double taxPercent;
+  final double tax;
+  final double total;
+  final String terms;
+}
+
 Future<void> printServiceOrder(ServiceOrderPrintData data) async {
   final document = pw.Document();
   final logoImage = await _loadLogoImage();
@@ -171,6 +231,43 @@ Future<void> printInvoice(InvoicePrintData data) async {
 
   await Printing.layoutPdf(
     name: 'factura_${data.invoiceNumber}.pdf',
+    onLayout: (_) async => document.save(),
+  );
+}
+
+Future<void> printQuote(QuotePrintData data) async {
+  final document = pw.Document();
+  final logoImage = await _loadLogoImage();
+
+  document.addPage(
+    pw.Page(
+      pageFormat: PdfPageFormat.letter,
+      margin: const pw.EdgeInsets.fromLTRB(28, 22, 28, 22),
+      build: (context) {
+        return pw.DefaultTextStyle(
+          style: const pw.TextStyle(fontSize: 8),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              _quoteHeader(data, logoImage),
+              pw.SizedBox(height: 8),
+              _quoteTopBlocks(data),
+              pw.SizedBox(height: 6),
+              _quoteLinesTable(data),
+              _quoteTermsAndTotals(data),
+              pw.SizedBox(height: 6),
+              _quoteDateLine(data),
+              pw.SizedBox(height: 8),
+              _quoteSignatureBlock(),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  await Printing.layoutPdf(
+    name: 'cotizacion_${data.quoteNumber}.pdf',
     onLayout: (_) async => document.save(),
   );
 }
@@ -477,6 +574,341 @@ pw.Widget _invoiceCell(
       maxLines: 1,
       overflow: pw.TextOverflow.clip,
     ),
+  );
+}
+
+pw.Widget _quoteHeader(QuotePrintData data, pw.MemoryImage? logoImage) {
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Container(
+        width: 215,
+        height: 92,
+        child: logoImage == null
+            ? pw.Center(
+                child: pw.Text(
+                  'PIT STOP',
+                  style: pw.TextStyle(
+                    fontSize: 28,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.red800,
+                  ),
+                ),
+              )
+            : pw.Image(logoImage, fit: pw.BoxFit.contain),
+      ),
+      pw.Spacer(),
+      pw.Container(
+        width: 238,
+        padding: const pw.EdgeInsets.only(top: 24),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Text(
+              'Cotizacion Comercial',
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              'No. ${data.quoteNumber}',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text('Fecha de Emision: ${data.issueDate}'),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+pw.Widget _quoteTopBlocks(QuotePrintData data) {
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Expanded(
+        child: _quoteBox(
+          title: 'DATOS DEL PROVEEDOR',
+          titleColor: PdfColors.grey300,
+          height: 132,
+          child: pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(6, 5, 6, 4),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                _quoteInline('Empresa:', data.providerCompany),
+                _quoteInline('RTN:', data.providerRtn),
+                _quoteInline('Telefono:', data.providerPhone),
+                _quoteInline('Correo:', data.providerEmail),
+                _quoteInline('Direccion:', data.providerAddress, maxLines: 3),
+                _quoteInline('Atiende:', data.providerAttends),
+              ],
+            ),
+          ),
+        ),
+      ),
+      pw.SizedBox(width: 18),
+      pw.Expanded(
+        child: pw.Column(
+          children: [
+            _quoteBox(
+              title: 'DATOS DEL CLIENTE',
+              titleColor: PdfColors.orange100,
+              height: 58,
+              child: pw.Padding(
+                padding: const pw.EdgeInsets.fromLTRB(6, 5, 6, 4),
+                child: pw.Column(
+                  children: [
+                    _quoteInline('Cliente:', data.customerName, maxLines: 2),
+                    _quoteInline(
+                      'Atencion:',
+                      data.customerAttention,
+                      maxLines: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            _quoteBox(
+              title: 'DATOS DEL VEHICULO',
+              titleColor: PdfColors.orange100,
+              height: 68,
+              child: pw.Padding(
+                padding: const pw.EdgeInsets.fromLTRB(6, 5, 6, 4),
+                child: pw.Column(
+                  children: [
+                    _quoteInline('Vehiculo:', data.vehicle),
+                    _quoteInline('Placa:', data.plate),
+                    _quoteInline('VIN:', data.vin),
+                    _quoteInline('KM:', data.mileage),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+pw.Widget _quoteLinesTable(QuotePrintData data) {
+  const minRows = 9;
+  final emptyRows = (minRows - data.lines.length).clamp(0, minRows).toInt();
+  const rowHeight = 24.0;
+
+  return pw.Table(
+    border: pw.TableBorder.all(width: 0.8),
+    columnWidths: const {
+      0: pw.FixedColumnWidth(42),
+      1: pw.FlexColumnWidth(4.6),
+      2: pw.FixedColumnWidth(88),
+      3: pw.FixedColumnWidth(88),
+    },
+    children: [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+        children: [
+          _quoteTableCell('CANT.', bold: true, height: 19),
+          _quoteTableCell('DESCRIPCION DE REPUESTO / SERVICIO',
+              bold: true, height: 19),
+          _quoteTableCell('P. UNITARIO (L.)', bold: true, height: 19),
+          _quoteTableCell('TOTAL (L.)', bold: true, height: 19),
+        ],
+      ),
+      for (final line in data.lines)
+        pw.TableRow(
+          children: [
+            _quoteTableCell(_formatQuantity(line.quantity), height: rowHeight),
+            _quoteTableCell(
+              line.description,
+              align: pw.Alignment.topLeft,
+              height: rowHeight,
+              maxLines: 2,
+            ),
+            _quoteTableCell(
+              _formatMoney(line.unitPrice),
+              align: pw.Alignment.centerRight,
+              height: rowHeight,
+            ),
+            _quoteTableCell(
+              _formatMoney(line.total),
+              align: pw.Alignment.centerRight,
+              height: rowHeight,
+            ),
+          ],
+        ),
+      for (var i = 0; i < emptyRows; i++)
+        pw.TableRow(
+          decoration: pw.BoxDecoration(
+            color: i.isEven ? PdfColors.white : PdfColors.grey100,
+          ),
+          children: [
+            _quoteTableCell('', height: rowHeight),
+            _quoteTableCell('', height: rowHeight),
+            _quoteTableCell('', height: rowHeight),
+            _quoteTableCell('', height: rowHeight),
+          ],
+        ),
+    ],
+  );
+}
+
+pw.Widget _quoteTermsAndTotals(QuotePrintData data) {
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Expanded(
+        child: pw.Container(
+          height: 76,
+          padding: const pw.EdgeInsets.fromLTRB(5, 5, 7, 4),
+          decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'TERMINOS Y CONDICIONES:',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              ),
+              pw.SizedBox(height: 2),
+              pw.Text(data.terms, maxLines: 7, style: const pw.TextStyle(fontSize: 6)),
+            ],
+          ),
+        ),
+      ),
+      pw.Container(
+        width: 176,
+        child: pw.Table(
+          border: pw.TableBorder.all(width: 0.8),
+          columnWidths: const {
+            0: pw.FlexColumnWidth(1.45),
+            1: pw.FlexColumnWidth(1),
+          },
+          children: [
+            _quoteTotalRow('SUB-TOTAL (L.):', _formatMoney(data.subtotal)),
+            _quoteTotalRow(
+              'ISV (${data.taxPercent.toStringAsFixed(0)}%):',
+              _formatMoney(data.tax),
+            ),
+            _quoteTotalRow(
+              'TOTAL GENERAL (L.):',
+              _formatMoney(data.total),
+              bold: true,
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+pw.Widget _quoteDateLine(QuotePrintData data) {
+  return pw.Align(
+    alignment: pw.Alignment.centerRight,
+    child: pw.Text(data.issueDate, style: const pw.TextStyle(fontSize: 8)),
+  );
+}
+
+pw.Widget _quoteSignatureBlock() {
+  return pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+    children: [
+      pw.Center(
+        child: pw.Text(
+          'DOCUMENTO VALIDO PARA FINES DE INFORMACION Y COMPENSACION FINANCIERA',
+          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+        ),
+      ),
+      pw.SizedBox(height: 28),
+      pw.Center(
+        child: pw.Container(
+          width: 210,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(top: pw.BorderSide(width: 0.8)),
+          ),
+          padding: const pw.EdgeInsets.only(top: 4),
+          alignment: pw.Alignment.center,
+          child: pw.Text('FIRMA Y SELLO DE AUTORIZACION'),
+        ),
+      ),
+    ],
+  );
+}
+
+pw.Widget _quoteBox({
+  required String title,
+  required PdfColor titleColor,
+  required double height,
+  required pw.Widget child,
+}) {
+  return pw.Container(
+    height: height,
+    decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Container(
+          height: 18,
+          alignment: pw.Alignment.center,
+          decoration: pw.BoxDecoration(
+            color: titleColor,
+            border: const pw.Border(bottom: pw.BorderSide(width: 0.7)),
+          ),
+          child: pw.Text(
+            title,
+            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.Expanded(child: child),
+      ],
+    ),
+  );
+}
+
+pw.Widget _quoteInline(String label, String value, {int maxLines = 1}) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.only(bottom: 2),
+    child: pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Container(
+          width: 48,
+          child: pw.Text(label, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+        ),
+        pw.Expanded(
+          child: pw.Text(value, maxLines: maxLines, overflow: pw.TextOverflow.clip),
+        ),
+      ],
+    ),
+  );
+}
+
+pw.Widget _quoteTableCell(
+  String text, {
+  bool bold = false,
+  double height = 20,
+  pw.Alignment align = pw.Alignment.center,
+  int maxLines = 1,
+}) {
+  return pw.Container(
+    height: height,
+    alignment: align,
+    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+    child: pw.Text(
+      text,
+      maxLines: maxLines,
+      overflow: pw.TextOverflow.clip,
+      style: pw.TextStyle(fontWeight: bold ? pw.FontWeight.bold : null),
+    ),
+  );
+}
+
+pw.TableRow _quoteTotalRow(String label, String value, {bool bold = false}) {
+  return pw.TableRow(
+    children: [
+      _quoteTableCell(label, bold: true, align: pw.Alignment.centerRight),
+      _quoteTableCell(value, bold: bold, align: pw.Alignment.centerRight),
+    ],
   );
 }
 
