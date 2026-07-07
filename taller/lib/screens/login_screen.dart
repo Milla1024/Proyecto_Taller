@@ -68,18 +68,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           onFieldSubmitted: (_) => _realizarLogin(),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Ingrese la contrasena';
+                              return 'Ingrese la contraseña';
                             }
                             return null;
                           },
                           decoration: _inputDecoration(
-                            label: 'Contrasena',
-                            hint: 'Ingrese su contrasena',
+                            label: 'Contraseña',
+                            hint: 'Ingrese su contraseña',
                             icon: Icons.lock_outline,
                             suffixIcon: IconButton(
                               tooltip: obscurePassword
-                                  ? 'Mostrar contrasena'
-                                  : 'Ocultar contrasena',
+                                  ? 'Mostrar contraseña'
+                                  : 'Ocultar contraseña',
                               onPressed: () {
                                 setState(() {
                                   obscurePassword = !obscurePassword;

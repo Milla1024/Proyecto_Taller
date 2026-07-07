@@ -6,6 +6,7 @@ import '../models/usuario.dart';
 import '../services/api_service.dart';
 import '../services/print_service.dart';
 import '../widgets/custom_button.dart';
+import 'cotizaciones_screen.dart';
 import 'notifications_sheet.dart';
 import 'ordenes_screen.dart';
 import 'service_order_screen.dart';
@@ -129,6 +130,7 @@ class _MainShellState extends State<MainShell> {
     _Destination('Inicio', Icons.dashboard_outlined),
     _Destination('Ordenes', Icons.assignment_outlined),
     _Destination('Orden servicio', Icons.fact_check_outlined),
+    _Destination('Cotizaciones', Icons.request_quote_outlined),
     _Destination('Facturas', Icons.receipt_long_outlined),
     _Destination('Usuarios', Icons.manage_accounts_outlined),
   ];
@@ -193,31 +195,52 @@ class _MainShellState extends State<MainShell> {
             child: IndexedStack(
               index: selectedIndex,
               children: [
-                DashboardView(
-                  onCreateOrder: () => _seleccionarVentana(2),
-                  idEmpleado: _isAdmin ? null : widget.currentUser?.id,
+                _ShellPage(
+                  active: selectedIndex == 0,
+                  child: DashboardView(
+                    onCreateOrder: () => _seleccionarVentana(2),
+                    idEmpleado: _isAdmin ? null : widget.currentUser?.id,
+                  ),
                 ),
-                OrdenesScreen(
-                  currentUser: widget.currentUser,
-                  refreshToken: ordenesRefreshToken,
-                  onEditarOrden: _editarOrden,
-                  onNotificationsChanged: _cargarConteoNotificaciones,
+                _ShellPage(
+                  active: selectedIndex == 1,
+                  child: OrdenesScreen(
+                    currentUser: widget.currentUser,
+                    refreshToken: ordenesRefreshToken,
+                    onEditarOrden: _editarOrden,
+                    onNotificationsChanged: _cargarConteoNotificaciones,
+                  ),
                 ),
-                ServiceOrderScreen(
-                  currentUser: widget.currentUser,
-                  refreshToken: serviceOrderRefreshToken,
-                  ordenExistente: ordenEnEdicion,
-                  onOrderSaved: () {
-                    setState(() {
-                      ordenesRefreshToken++;
-                      serviceOrderRefreshToken++;
-                      selectedIndex = 0;
-                    });
-                  },
-                  onOrderUpdated: _cerrarEdicionOrden,
+                _ShellPage(
+                  active: selectedIndex == 2,
+                  child: ServiceOrderScreen(
+                    currentUser: widget.currentUser,
+                    refreshToken: serviceOrderRefreshToken,
+                    ordenExistente: ordenEnEdicion,
+                    onOrderSaved: () {
+                      setState(() {
+                        ordenesRefreshToken++;
+                        serviceOrderRefreshToken++;
+                        selectedIndex = 0;
+                      });
+                    },
+                    onOrderUpdated: _cerrarEdicionOrden,
+                  ),
                 ),
-                const InvoiceScreen(),
-                UserManagementScreen(refreshToken: usuariosRefreshToken),
+                _ShellPage(
+                  active: selectedIndex == 3,
+                  child: const CotizacionesScreen(),
+                ),
+                _ShellPage(
+                  active: selectedIndex == 4,
+                  child: const InvoiceScreen(),
+                ),
+                _ShellPage(
+                  active: selectedIndex == 5,
+                  child: UserManagementScreen(
+                    refreshToken: usuariosRefreshToken,
+                  ),
+                ),
               ],
             ),
           ),
@@ -236,6 +259,24 @@ class _MainShellState extends State<MainShell> {
                   ),
               ],
             ),
+    );
+  }
+}
+
+class _ShellPage extends StatelessWidget {
+  const _ShellPage({required this.active, required this.child});
+
+  final bool active;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TickerMode(
+      enabled: active,
+      child: ExcludeFocus(
+        excluding: !active,
+        child: ExcludeSemantics(excluding: !active, child: child),
+      ),
     );
   }
 }

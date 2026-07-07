@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../models/comentario_orden.dart';
+import '../models/cotizacion.dart';
 import '../models/imagen_comentario.dart';
 import '../models/orden_detalle.dart';
 import '../models/orden_servicio.dart';
@@ -146,6 +147,7 @@ class ApiService {
     await _prepareEmpleadoTable(db);
     await _prepareServiceOrderTables(db);
     await _prepareFacturaTables(db);
+    await _prepareCotizacionTables(db);
     await _prepareNotificacionUsuarioTable(db);
     await _prepareComentarioOrdenTable(db);
     await _prepareComentarioImagenTable(db);
@@ -528,6 +530,56 @@ class ApiService {
     ''');
   }
 
+  Future<void> _prepareCotizacionTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cotizacion (
+        no_cotizacion INTEGER PRIMARY KEY AUTOINCREMENT,
+        proveedor_empresa TEXT NOT NULL,
+        proveedor_rtn TEXT,
+        proveedor_telefono TEXT,
+        proveedor_correo TEXT,
+        proveedor_direccion TEXT,
+        proveedor_atiende TEXT,
+        cliente_nombre TEXT NOT NULL,
+        cliente_atencion TEXT,
+        vehiculo TEXT,
+        placa TEXT,
+        vin TEXT,
+        kilometraje TEXT,
+        fecha_emision TEXT NOT NULL,
+        fecha_iso TEXT,
+        subtotal REAL DEFAULT 0,
+        impuesto_porcentaje REAL DEFAULT 0,
+        impuesto REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        terminos TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cotizacion_linea (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        no_cotizacion INTEGER NOT NULL,
+        cantidad REAL NOT NULL,
+        descripcion TEXT NOT NULL,
+        precio_unitario REAL NOT NULL,
+        total REAL NOT NULL,
+        FOREIGN KEY (no_cotizacion) REFERENCES cotizacion(no_cotizacion)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_cotizacion_cliente_nombre
+      ON cotizacion(cliente_nombre)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_cotizacion_fecha_iso
+      ON cotizacion(fecha_iso)
+    ''');
+  }
+
   /// SQLite no permite ALTER de un CHECK existente: si la tabla todavia tiene
   /// el CHECK viejo ('En Proceso', 'Finalizado', 'Cancelado'), la reconstruye
   /// con el CHECK nuevo, mapeando los valores de estado y preservando el
@@ -675,6 +727,28 @@ class ApiService {
     return (maxId > sequenceId ? maxId : sequenceId) + 1;
   }
 
+  Future<int> obtenerSiguienteNoCotizacion() async {
+    final db = await _db;
+    final maxRows = await db.rawQuery(
+      'SELECT COALESCE(MAX(no_cotizacion), 0) AS max_id FROM cotizacion',
+    );
+    final maxId = maxRows.first['max_id'] as int;
+
+    var sequenceId = 0;
+    try {
+      final sequenceRows = await db.rawQuery(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'cotizacion'",
+      );
+      if (sequenceRows.isNotEmpty) {
+        sequenceId = sequenceRows.first['seq'] as int;
+      }
+    } catch (_) {
+      sequenceId = 0;
+    }
+
+    return (maxId > sequenceId ? maxId : sequenceId) + 1;
+  }
+
   Future<Usuario> crearUsuario(Usuario usuario) async {
     final db = await _db;
     final id = await db.insert('empleado', _toEmpleadoMap(usuario));
@@ -765,6 +839,105 @@ class ApiService {
       whereArgs: whereArgs.isEmpty ? null : whereArgs,
       orderBy: 'COALESCE(fecha_iso, fecha) DESC, no_factura DESC',
     );
+  }
+
+  Future<int> guardarCotizacion({
+    required String proveedorEmpresa,
+    required String proveedorRtn,
+    required String proveedorTelefono,
+    required String proveedorCorreo,
+    required String proveedorDireccion,
+    required String proveedorAtiende,
+    required String clienteNombre,
+    required String clienteAtencion,
+    required String vehiculo,
+    required String placa,
+    required String vin,
+    required String kilometraje,
+    required String fechaEmision,
+    required String fechaIso,
+    required double subtotal,
+    required double impuestoPorcentaje,
+    required double impuesto,
+    required double total,
+    required String terminos,
+    required List<Map<String, Object?>> lineas,
+  }) async {
+    final db = await _db;
+    return db.transaction<int>((txn) async {
+      final cotizacionId = await txn.insert('cotizacion', {
+        'proveedor_empresa': proveedorEmpresa.trim(),
+        'proveedor_rtn': proveedorRtn.trim(),
+        'proveedor_telefono': proveedorTelefono.trim(),
+        'proveedor_correo': proveedorCorreo.trim(),
+        'proveedor_direccion': proveedorDireccion.trim(),
+        'proveedor_atiende': proveedorAtiende.trim(),
+        'cliente_nombre': clienteNombre.trim(),
+        'cliente_atencion': clienteAtencion.trim(),
+        'vehiculo': vehiculo.trim(),
+        'placa': placa.trim(),
+        'vin': vin.trim(),
+        'kilometraje': kilometraje.trim(),
+        'fecha_emision': fechaEmision.trim(),
+        'fecha_iso': fechaIso.trim(),
+        'subtotal': subtotal,
+        'impuesto_porcentaje': impuestoPorcentaje,
+        'impuesto': impuesto,
+        'total': total,
+        'terminos': terminos.trim(),
+      });
+
+      for (final linea in lineas) {
+        await txn.insert('cotizacion_linea', {
+          'no_cotizacion': cotizacionId,
+          'cantidad': linea['cantidad'],
+          'descripcion': linea['descripcion'],
+          'precio_unitario': linea['precio_unitario'],
+          'total': linea['total'],
+        });
+      }
+
+      return cotizacionId;
+    });
+  }
+
+  Future<List<CotizacionResumen>> listarCotizaciones({
+    String? clienteNombre,
+  }) async {
+    final db = await _db;
+    final filtro = clienteNombre?.trim();
+    final rows = await db.query(
+      'cotizacion',
+      where: filtro == null || filtro.isEmpty
+          ? null
+          : 'cliente_nombre LIKE ? COLLATE NOCASE',
+      whereArgs: filtro == null || filtro.isEmpty ? null : ['%$filtro%'],
+      orderBy: 'COALESCE(fecha_iso, fecha_emision) DESC, no_cotizacion DESC',
+    );
+    return rows.map(CotizacionResumen.fromMap).toList();
+  }
+
+  Future<CotizacionDetalle?> obtenerCotizacionCompleta(
+    int noCotizacion,
+  ) async {
+    final db = await _db;
+    final cotizacionRows = await db.query(
+      'cotizacion',
+      where: 'no_cotizacion = ?',
+      whereArgs: [noCotizacion],
+      limit: 1,
+    );
+    if (cotizacionRows.isEmpty) {
+      return null;
+    }
+
+    final lineas = await db.query(
+      'cotizacion_linea',
+      where: 'no_cotizacion = ?',
+      whereArgs: [noCotizacion],
+      orderBy: 'id ASC',
+    );
+    return CotizacionDetalle.fromMap(cotizacionRows.first, lineas);
   }
 
   Future<DashboardStats> obtenerDashboardStats({int? idEmpleado}) async {
